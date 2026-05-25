@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 
 async function leerCasosDePrueba(url) {
-    // Extraer el ID de la hoja desde la URL
     const matches = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
     if (!matches) {
         throw new Error('URL de Google Sheets inválida');
@@ -13,7 +12,6 @@ async function leerCasosDePrueba(url) {
     
     console.log('Descargando desde:', csvUrl);
     
-    // Descargar el CSV
     const response = await fetch(csvUrl);
     if (!response.ok) {
         throw new Error(`Error al descargar el CSV: ${response.status}`);
@@ -21,9 +19,10 @@ async function leerCasosDePrueba(url) {
     
     const csvText = await response.text();
     
-    // Parsear el CSV
     const lines = csvText.split('\n');
     const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+    
+    console.log('📋 HEADERS (columnas del Excel):', headers);
     
     const casos = [];
     
@@ -41,7 +40,20 @@ async function leerCasosDePrueba(url) {
             row[headers[j]] = valor || '';
         }
         
-        // Solo agregar si tiene al menos un método para probar
+        console.log('==================================');
+        console.log(`📌 FILA ${i}:`);
+        console.log('  CuentaID:', row['CuentaID']);
+        console.log('  Documento:', row['Documento']);
+        console.log('  ClienteID:', row['ClienteID']);
+        console.log('  Producto_Codigo:', row['Producto_Codigo']);
+        console.log('  Producto_CodigoBarra:', row['Producto_CodigoBarra']);
+        console.log('  Probar_Manual:', row['Probar_Manual']);
+        console.log('  Probar_CodigoBarra:', row['Probar_CodigoBarra']);
+        console.log('  Probar_AsignMultiple:', row['Probar_AsignMultiple']);
+        console.log('  Probar_Plantilla:', row['Probar_Plantilla']);
+        console.log('  Plantilla_Nombre:', row['Plantilla_Nombre']);
+        console.log('==================================');
+        
         const tieneMetodo = row['Probar_Manual'] === 'SI' || 
                            row['Probar_CodigoBarra'] === 'SI' || 
                            row['Probar_AsignMultiple'] === 'SI' || 
@@ -54,10 +66,10 @@ async function leerCasosDePrueba(url) {
         
         casos.push({
             cuentaID: row['CuentaID'] || '',
-            documento: (row['Documento'] || '').toLowerCase(), // Normalizado a minúsculas
+            documento: (row['Documento'] || '').toLowerCase(),
             clienteID: row['ClienteID'] || '',
             producto: {
-                codigoInterno: row['Producto_CodigoInterno'] || '',
+                codigoInterno: row['Producto_Codigo'] || '',  // ← SOLO CAMBIÉ ESTO
                 codigoBarra: row['Producto_CodigoBarra'] || ''
             },
             probarMetodos: {
