@@ -52,6 +52,7 @@ async function leerCasosDePrueba(url) {
         console.log('  Probar_AsignMultiple:', row['Probar_AsignMultiple']);
         console.log('  Probar_Plantilla:', row['Probar_Plantilla']);
         console.log('  Plantilla_Nombre:', row['Plantilla_Nombre']);
+        console.log('  Configuraciones (crudo):', row['Configuraciones']);
         console.log('==================================');
         
         const tieneMetodo = row['Probar_Manual'] === 'SI' || 
@@ -64,12 +65,15 @@ async function leerCasosDePrueba(url) {
             continue;
         }
         
+        const configuraciones = convertirConfiguraciones(row['Configuraciones'] || '');
+        console.log('📋 Configuraciones convertidas:', configuraciones);
+        
         casos.push({
             cuentaID: row['CuentaID'] || '',
             documento: (row['Documento'] || '').toLowerCase(),
             clienteID: row['ClienteID'] || '',
             producto: {
-                codigoInterno: row['Producto_Codigo'] || '',  // ← SOLO CAMBIÉ ESTO
+                codigoInterno: row['Producto_Codigo'] || '',
                 codigoBarra: row['Producto_CodigoBarra'] || ''
             },
             probarMetodos: {
@@ -79,7 +83,7 @@ async function leerCasosDePrueba(url) {
                 plantilla: row['Probar_Plantilla'] === 'SI'
             },
             plantillaNombre: row['Plantilla_Nombre'] || null,
-            configuraciones: convertirConfiguraciones(row['Configuraciones'] || '')
+            configuraciones: configuraciones
         });
     }
     

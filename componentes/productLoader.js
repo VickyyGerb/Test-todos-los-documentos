@@ -82,9 +82,7 @@ class ProductLoader {
         await this.page.keyboard.press('ArrowDown');
         await this.page.keyboard.press('Enter');
         await this.page.waitForTimeout(3000);
-        const asociarLink = this.page.getByRole('link', { name: 'Asociar' }).click({ force: true }); //NO ANDA
-        await asociarLink.waitFor({ state: 'visible', timeout: 5000 });
-        await asociarLink.click();
+        await this.page.locator('.modal-footer:has-text("Asociar") a.btn-success').click();
         await this.page.waitForTimeout(3000);
         
         await this.page.click('#select2-chosen-13');
