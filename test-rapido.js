@@ -39,13 +39,48 @@ if (!urlExcel) {
                 console.log(`✅ Cliente ${caso.clienteID} seleccionado`);
             }
             
-            console.log('📋 DEBUG - Configuraciones recibidas:', JSON.stringify(caso.configuraciones, null, 2));
-            console.log('📋 DEBUG - ¿Tiene configuraciones?', Object.keys(caso.configuraciones).length > 0);
-            console.log('📋 DEBUG - Tipo de configuraciones:', typeof caso.configuraciones);
+            const productLoader = new ProductLoader(page);
+            const preciosAntes = [];
             
-            const configApplier = new ConfigApplier(page);
+            // ==================== 1. CARGAR PRODUCTOS SIN CONFIGURACIONES ====================
+            console.log('\n📦 Cargando productos SIN configuraciones:');
+            
+            if (caso.probarMetodos.manual && caso.producto.codigoInterno) {
+                console.log('   📦 Carga manual...');
+                const precio = await productLoader.cargarManual(caso.producto.codigoInterno);
+                preciosAntes.push({ metodo: 'manual', precio });
+                console.log(`      Precio: ${precio}`);
+                await page.waitForTimeout(500);
+            }
+            
+            if (caso.probarMetodos.codigoBarra && caso.producto.codigoBarra) {
+                console.log('   📷 Código de barra...');
+                const precio = await productLoader.cargarPorCodigoBarra(caso.producto.codigoBarra);
+                preciosAntes.push({ metodo: 'codigoBarra', precio });
+                console.log(`      Precio: ${precio}`);
+                await page.waitForTimeout(500);
+            }
+            
+            if (caso.probarMetodos.asignMultiple && caso.producto.codigoInterno) {
+                console.log('   📋 Asignación múltiple...');
+                const precio = await productLoader.cargarAsignacionMultiple(caso.producto.codigoInterno);
+                preciosAntes.push({ metodo: 'asignMultiple', precio });
+                console.log(`      Precio: ${precio}`);
+                await page.waitForTimeout(500);
+            }
+            
+            if (caso.probarMetodos.plantilla && caso.plantillaNombre) {
+                console.log('   📄 Plantilla...');
+                const precio = await productLoader.cargarDesdePlantilla(caso.plantillaNombre);
+                preciosAntes.push({ metodo: 'plantilla', precio });
+                console.log(`      Precio: ${precio}`);
+                await page.waitForTimeout(500);
+            }
+            
+            // ==================== 2. APLICAR CONFIGURACIONES ====================
             if (caso.configuraciones && Object.keys(caso.configuraciones).length > 0) {
-                console.log('⚙️ Aplicando configuraciones...');
+                console.log('\n⚙️ Aplicando configuraciones...');
+                const configApplier = new ConfigApplier(page);
                 await configApplier.aplicar(caso.configuraciones);
                 console.log(`✅ Configuraciones aplicadas`);
                 await page.waitForTimeout(2000);
@@ -53,48 +88,17 @@ if (!urlExcel) {
                 console.log('⚠️ No hay configuraciones para aplicar');
             }
             
-            const productLoader = new ProductLoader(page);
-            const precios = [];
-            
-            if (caso.probarMetodos.manual && caso.producto.codigoInterno) {
-                console.log('📦 Probando carga manual...');
-                const precio = await productLoader.cargarManual(caso.producto.codigoInterno);
-                precios.push({ metodo: 'manual', precio });
-                console.log(`   Precio: ${precio}`);
-                await page.waitForTimeout(500);
-            }
-            
-            if (caso.probarMetodos.codigoBarra && caso.producto.codigoBarra) {
-                console.log('📷 Probando código de barra...');
-                const precio = await productLoader.cargarPorCodigoBarra(caso.producto.codigoBarra);
-                precios.push({ metodo: 'codigoBarra', precio });
-                console.log(`   Precio: ${precio}`);
-                await page.waitForTimeout(500);
-            }
-            
-            if (caso.probarMetodos.asignMultiple && caso.producto.codigoInterno) {
-                console.log('📋 Probando asignación múltiple...');
-                const precio = await productLoader.cargarAsignacionMultiple(caso.producto.codigoInterno);
-                precios.push({ metodo: 'asignMultiple', precio });
-                console.log(`   Precio: ${precio}`);
-                await page.waitForTimeout(500);
-            }
-            
-            if (caso.probarMetodos.plantilla && caso.plantillaNombre) {
-                console.log('📄 Probando plantilla...');
-                const precio = await productLoader.cargarDesdePlantilla(caso.plantillaNombre);
-                precios.push({ metodo: 'plantilla', precio });
-                console.log(`   Precio: ${precio}`);
-            }
-            
-            console.log('\n📊 VERIFICANDO CONSISTENCIA:');
-            const preciosUnicos = [...new Set(precios.map(p => p.precio))];
-            if (preciosUnicos.length === 1) {
-                console.log(`✅ ÉXITO: Todos los métodos dan el mismo precio: ${preciosUnicos[0]}`);
+            // ==================== 3. VERIFICACIONES ====================
+            console.log('\n📊 VERIFICACIÓN ANTES de configuraciones:');
+            const preciosUnicosAntes = [...new Set(preciosAntes.map(p => p.precio))];
+            if (preciosUnicosAntes.length === 1) {
+                console.log(`✅ ANTES: Todos los métodos dan el mismo precio: ${preciosUnicosAntes[0]}`);
             } else {
-                console.log(`❌ ERROR: Los precios NO coinciden`);
-                precios.forEach(p => console.log(`   ${p.metodo}: ${p.precio}`));
+                console.log(`❌ ANTES: Los precios NO coinciden`);
+                preciosAntes.forEach(p => console.log(`   ${p.metodo}: ${p.precio}`));
             }
+            
+            console.log('\n📊 Los precios DESPUÉS de configuraciones ya fueron capturados por el ConfigApplier');
             
             await page.waitForTimeout(2000);
             
