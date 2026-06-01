@@ -6,6 +6,9 @@ class ProductLoader {
     }
 
     async obtenerPrecioConTab() {
+        // Cerrar cualquier dropdown abierto
+        await this.page.keyboard.press('Escape');
+        await this.page.waitForTimeout(200);
         await this.page.keyboard.press('Tab');
         await this.page.keyboard.press('Tab');
         await this.page.keyboard.press('Tab');
@@ -14,13 +17,13 @@ class ProductLoader {
         
         const valor = await this.page.evaluate(() => {
             const activeElement = document.activeElement;
-            return activeElement.value;
+            return activeElement ? activeElement.value : '0';
         });
         
-        console.log('Valor capturado con Tab:', valor);
+        console.log('   Valor capturado con Tab:', valor);
         
         const precioLimpio = valor.replace(/\./g, '').replace(',', '.').trim();
-        return parseFloat(precioLimpio);
+        return parseFloat(precioLimpio) || 0;
     }
 
     async cargarManual(codigoInterno, cantidad = 1) {   
