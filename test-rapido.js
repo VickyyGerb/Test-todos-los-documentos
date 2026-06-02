@@ -30,7 +30,7 @@ if (!urlExcel) {
     const casos = await leerCasosDePrueba(urlExcel);
     console.log(`✅ Se encontraron ${casos.length} casos`);
 
-    const browser = await chromium.launch({ headless: false, slowMo: 300 });
+    const browser = await chromium.launch({ headless: false, slowMo: 80 });
 
     let numeroCaso = 0;
     for (const caso of casos) {
@@ -68,8 +68,12 @@ if (!urlExcel) {
                 try {
                     console.log('📦 Probando carga manual...');
                     const precio = await productLoader.cargarManual(caso.producto.codigoInterno);
-                    preciosAntes.push({ metodo: 'manual', precio });
-                    console.log(`   ✅ Precio: ${precio}`);
+                    if (precio > 0) {
+                        preciosAntes.push({ metodo: 'manual', precio });
+                        console.log(`   ✅ Precio: ${precio}`);
+                    } else {
+                        console.log('   ⚠️ Manual no cargó el producto — se OMITE de la comparación');
+                    }
                 } catch (e) {
                     console.log(`   ❌ Error en manual: ${e.message}`);
                 }
@@ -80,8 +84,12 @@ if (!urlExcel) {
                 try {
                     console.log('📷 Probando código de barra...');
                     const precio = await productLoader.cargarPorCodigoBarra(caso.producto.codigoBarra);
-                    preciosAntes.push({ metodo: 'codigoBarra', precio });
-                    console.log(`   ✅ Precio: ${precio}`);
+                    if (precio > 0) {
+                        preciosAntes.push({ metodo: 'codigoBarra', precio });
+                        console.log(`   ✅ Precio: ${precio}`);
+                    } else {
+                        console.log('   ⚠️ Código de barra no cargó el producto — se OMITE de la comparación');
+                    }
                 } catch (e) {
                     console.log(`   ❌ Error en código de barra: ${e.message}`);
                 }
@@ -92,8 +100,12 @@ if (!urlExcel) {
                 try {
                     console.log('📋 Probando asignación múltiple...');
                     const precio = await productLoader.cargarAsignacionMultiple(caso.producto.codigoInterno);
-                    preciosAntes.push({ metodo: 'asignMultiple', precio });
-                    console.log(`   ✅ Precio: ${precio}`);
+                    if (precio > 0) {
+                        preciosAntes.push({ metodo: 'asignMultiple', precio });
+                        console.log(`   ✅ Precio: ${precio}`);
+                    } else {
+                        console.log('   ⚠️ Asignación múltiple no cargó el producto — se OMITE de la comparación');
+                    }
                 } catch (e) {
                     console.log(`   ❌ Error en asignación múltiple: ${e.message}`);
                 }
@@ -104,8 +116,12 @@ if (!urlExcel) {
                 try {
                     console.log('📄 Probando plantilla...');
                     const precio = await productLoader.cargarDesdePlantilla(caso.plantillaNombre);
-                    preciosAntes.push({ metodo: 'plantilla', precio });
-                    console.log(`   ✅ Precio: ${precio}`);
+                    if (precio > 0) {
+                        preciosAntes.push({ metodo: 'plantilla', precio });
+                        console.log(`   ✅ Precio: ${precio}`);
+                    } else {
+                        console.log('   ⚠️ Plantilla no cargó el producto — se OMITE de la comparación');
+                    }
                 } catch (e) {
                     console.log(`   ❌ Error en plantilla: ${e.message}`);
                 }

@@ -6,6 +6,7 @@ class ConfigApplier {
     async aplicar(configuraciones, codigoProducto) {
         console.log('📋 Aplicando configuraciones:', configuraciones);
         console.log('📋 Código producto recibido en aplicar:', codigoProducto);
+
         for (const [nombre, valor] of Object.entries(configuraciones)) {
             await this.aplicarConfiguracion(nombre, valor, codigoProducto);
         }
@@ -67,29 +68,33 @@ class ConfigApplier {
         console.log(`⚙️ Aplicando configuración: ${nombre} = ${valor}`);
         
         switch(nombre) {
-            case 'descuento_global':
+            case 'descuento_global': {
                 try {
                     console.log(`   Aplicando descuento global: ${valor}`);
-                    await this.page.evaluate((valor) => {
-                        const campos = document.querySelectorAll('input');
-                        for (const campo of campos) {
-                            if ((campo.name && campo.name.toLowerCase().includes('descuento')) ||
-                                (campo.id && campo.id.toLowerCase().includes('descuento'))) {
-                                campo.value = valor;
-                                campo.dispatchEvent(new Event('change', { bubbles: true }));
-                                campo.dispatchEvent(new Event('input', { bubbles: true }));
-                            }
-                        }
-                    }, valor);
-                    await this.page.waitForTimeout(1000);
-                    
-                    const precios = await this.leerPrecios();
-                    console.log(`   Precios después del descuento: ${precios.join(', ')}`);
+                    // El descuento global es a nivel documento (#Descuento = %),
+                    // no por producto. Logueamos los totales antes/después para
+                    // ver si se aplica y dónde se refleja.
+                    const leerTotales = () => this.page.evaluate(() => {
+                        const g = (id) => { const e = document.getElementById(id); return e ? e.value : '(n/a)'; };
+                        return `Descuento%=${g('Descuento')}  ValorDescuento=${g('ValorDescuento')}  Subtotal=${g('SubtotalNetoGravado')}  TotalTemp=${g('TotalTemp')}`;
+                    });
+                    console.log('   📊 ANTES:   ' + await leerTotales());
+
+                    const input = this.page.locator('#Descuento');
+                    await input.scrollIntoViewIfNeeded();
+                    await input.evaluate(el => el.removeAttribute('readonly'));
+                    await input.click();
+                    await input.fill(String(valor));
+                    await this.page.keyboard.press('Tab');
+                    await this.page.waitForTimeout(1500);
+
+                    console.log('   📊 DESPUÉS: ' + await leerTotales());
                     console.log(`   ✅ Descuento global aplicado: ${valor}`);
                 } catch (e) {
                     console.log(`   ❌ Error: ${e.message}`);
                 }
                 break;
+            }
                 
             case 'moneda':
                 await this.page.locator('#MonedaId_chosen .chosen-single').click();        
@@ -99,11 +104,30 @@ class ConfigApplier {
                 console.log(`   ✅ Moneda aplicada: ${valor}`);
                 break;
                 
-            case 'cotizacion':
-                await this.page.fill('#cotizacion', valor);
+            case 'cotizacion': {
+                // ===== DIAGNÓSTICO TEMPORAL: campos de cotización/cambio visibles =====
+                const diagC = await this.page.evaluate(() => {
+                    const out = [];
+                    document.querySelectorAll('input[name], select[name]').forEach(el => {
+                        const t = (el.name + ' ' + el.id + ' ' + (el.placeholder || '')).toLowerCase();
+                        if (/(cotiza|cambio|tasa|moneda|divisa)/.test(t)) {
+                            out.push(`name="${el.name}" id="${el.id}" type="${el.type || ''}" value="${el.value}" visible=${el.offsetParent !== null}`);
+                        }
+                    });
+                    return out.join('\n') || '(no encontré campos de cotización/cambio)';
+                });
+                require('fs').writeFileSync('debug-cotizacion.txt', diagC);
+                console.log('   🔎 debug-cotizacion.txt escrito');
+                // ===== FIN DIAGNÓSTICO =====
+                // El campo editable de cotización es #NuevaCotizacionDolar (el
+                // #CotizacionDolar es solo display). Llenar + Tab para recalcular.
+                await this.page.fill('#NuevaCotizacionDolar', valor);
+                await this.page.keyboard.press('Tab');
+                await this.page.waitForTimeout(1000);
                 await this.leerPrecios();
                 console.log(`   ✅ Cotización aplicada: ${valor}`);
                 break;
+            }
                 
             case 'lista_precios':
                 await this.page.click('#ListaDePreciosVentaId_chosen .chosen-single');
