@@ -15,7 +15,7 @@ class ConfigApplier {
     async leerPrecios() {
         
         const precios = await this.page.evaluate(() => {
-            const reId = /^(ListaProducto(?!Libre)\w*?)\[(.+?)\]\.ProductoId$/;
+            const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
             const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
             const IVA = 0.21; // presupuestos no guardan el IVA por línea: lo calculamos
             const precioConIva = (prefijo, guid) => {
@@ -41,7 +41,7 @@ class ConfigApplier {
     async aplicarDescuentoPorItem(valor) {
         
         const items = await this.page.evaluate(() => {
-            const reId = /^(ListaProducto(?!Libre)\w*?)\[(.+?)\]\.ProductoId$/;
+            const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
             const out = [];
             document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
                 const m = inp.name.match(reId);

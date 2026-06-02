@@ -2,18 +2,21 @@ const { expect } = require('@playwright/test');
 
 // Las tablas de productos se llaman distinto según el documento:
 // ListaProductoVenta (factura/venta), ListaProductoPresupuestoVenta (presupuesto),
-// etc. Por eso los selectores matchean el patrón ListaProducto<...>Venta y
-// excluyen "Libre" (tabla de productos libres), en vez de un nombre fijo.
+// ProductosLista (pedido). Por eso los selectores matchean ese patrón y excluyen
+// los de productos libres (ListaProducto*Libre*, ProductosLibresLista).
+// REGEX (prefijo de la tabla de productos), reutilizado en varios lugares:
+//   /^(?:ListaProducto(?!Libre)\w*?|ProductosLista)\[<guid>\]\.<campo>$/
 
 class ProductLoader {
-    constructor(page) {
+    constructor(page, documento) {
         this.page = page;
+        this.documento = (documento || '').toLowerCase();
     }
 
     // GUID de las filas de producto que YA tienen un producto cargado.
     async snapshotGuids() {
         return await this.page.evaluate(() => {
-            const re = /^ListaProducto(?!Libre)\w*?\[(.+?)\]\.ProductoId$/;
+            const re = /^(?:ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
             const guids = [];
             document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
                 const m = inp.name.match(re);
@@ -32,7 +35,7 @@ class ProductLoader {
 
         for (let t = 0; t < timeout; t += intervalo) {
             info = await this.page.evaluate((antes) => {
-                const re = /^(ListaProducto(?!Libre)\w*?)\[(.+?)\]\.ProductoId$/;
+                const re = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
                 const s = new Set(antes);
                 const inputs = document.querySelectorAll('input[name$=".ProductoId"]');
                 for (const inp of inputs) {
@@ -145,6 +148,7 @@ class ProductLoader {
     }
 
     async cargarAsignacionMultiple(codigoInterno, cantidad = 1) {
+        if (this.documento === 'pedido') return this.cargarAsignacionMultiplePedido(codigoInterno, cantidad);
         const antes = await this.snapshotGuids();
 
         await this.page.click('#btn-color-youtube.dropdown-toggle.btn.btn-sm');
@@ -172,6 +176,7 @@ class ProductLoader {
     }
 
     async cargarDesdePlantilla(nombrePlantilla) {
+        if (this.documento === 'pedido') return this.cargarDesdePlantillaPedido(nombrePlantilla);
         const antes = await this.snapshotGuids();
 
         await this.page.click('#btn-color-youtube.dropdown-toggle.btn.btn-sm');
@@ -184,6 +189,24 @@ class ProductLoader {
         await this.page.waitForTimeout(3000);
 
         return await this.leerPrecioNuevo(antes);
+    }
+
+    // ========================================================================
+    // SECCIÓN EXCLUSIVA DE PEDIDO
+    // En Pedido la carga MANUAL y por CÓDIGO DE BARRA son iguales que en el
+    // resto (mismo select2 .productoId); solo cambia el nombre de la tabla
+    // (ProductosLista), ya contemplado en la detección. Por eso esos dos NO
+    // pasan por acá. Asignación múltiple y plantilla usan otros botones en
+    // Pedido, así que quedan exclusivos (pendientes).
+    // ========================================================================
+    async cargarAsignacionMultiplePedido(codigoInterno, cantidad = 1) {
+        console.log('   ⏳ Pedido (asignación múltiple): pendiente de implementar — se omite');
+        return 0;
+    }
+
+    async cargarDesdePlantillaPedido(nombrePlantilla) {
+        console.log('   ⏳ Pedido (plantilla): pendiente de implementar — se omite');
+        return 0;
     }
 
     async cargar(metodo, datos) {
