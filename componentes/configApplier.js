@@ -92,13 +92,13 @@ class ConfigApplier {
                 await this.page.locator('#MonedaId_chosen .chosen-single').click();        
                 await this.page.keyboard.type(valor); 
                 await this.page.keyboard.press("Enter");
-                await this.leerPreciosConTab();
+                await this.leerPreciosConTab(codigoProducto);
                 console.log(`   ✅ Moneda aplicada: ${valor}`);
                 break;
                 
             case 'cotizacion':
                 await this.page.fill('#cotizacion', valor);
-                await this.leerPreciosConTab();
+                await this.leerPreciosConTab(codigoProducto);
                 console.log(`   ✅ Cotización aplicada: ${valor}`);
                 break;
                 
@@ -106,7 +106,7 @@ class ConfigApplier {
                 await this.page.click('#ListaDePreciosVentaId_chosen .chosen-single');
                 await this.page.keyboard.type(valor);
                 await this.page.keyboard.press('Enter');
-                await this.leerPreciosConTab();
+                await this.leerPreciosConTab(codigoProducto);
                 console.log(`   ✅ Lista de precios aplicada: ${valor}`);
                 break;
                 
