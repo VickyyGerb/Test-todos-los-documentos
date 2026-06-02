@@ -13,7 +13,7 @@ class ProductLoader {
     // GUID de las filas de producto que YA tienen un producto cargado.
     async snapshotGuids() {
         return await this.page.evaluate(() => {
-            const re = /^ListaProducto(?!Libre)\w*Venta\[(.+?)\]\.ProductoId$/;
+            const re = /^ListaProducto(?!Libre)\w*?\[(.+?)\]\.ProductoId$/;
             const guids = [];
             document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
                 const m = inp.name.match(re);
@@ -32,7 +32,7 @@ class ProductLoader {
 
         for (let t = 0; t < timeout; t += intervalo) {
             info = await this.page.evaluate((antes) => {
-                const re = /^(ListaProducto(?!Libre)\w*Venta)\[(.+?)\]\.ProductoId$/;
+                const re = /^(ListaProducto(?!Libre)\w*?)\[(.+?)\]\.ProductoId$/;
                 const s = new Set(antes);
                 const inputs = document.querySelectorAll('input[name$=".ProductoId"]');
                 for (const inp of inputs) {
@@ -70,28 +70,27 @@ class ProductLoader {
     // Abre el buscador del select2 de producto de la fila vacía (ProductoId sin
     // valor), sin depender de #select2-chosen-N fijo ni del tipo de documento.
     async abrirSelectProductoVacio() {
-        const ok = await this.page.evaluate(() => {
-            const re = /^ListaProducto(?!Libre)\w*Venta\[(.+?)\]\.ProductoId$/;
-            const inputs = document.querySelectorAll('input[name$=".ProductoId"]');
-            for (const prod of inputs) {
-                if (!re.test(prod.name)) continue;
-                if (prod.value && prod.value.trim() !== '') continue; // ya tiene producto
-                const cont = prod.id ? document.getElementById('s2id_' + prod.id) : null;
-                const choice = cont ? (cont.querySelector('.select2-choice') || cont.querySelector('.select2-chosen')) : null;
-                if (choice) {
-                    choice.setAttribute('data-cargar-aqui', '1');
-                    return true;
-                }
-            }
-            return false;
-        });
+        // El select2 de producto tiene la clase "productoId" en su contenedor
+        // (vale para factura, presupuesto, etc.). Usamos un locator de Playwright
+        // en vez de "marcar y clickear": el locator se re-resuelve y reintenta solo
+        // si el elemento se detacha/re-renderiza (que era lo que rompía el click
+        // cuando select2 se reinicia tras elegir el cliente).
+        await this.page.waitForTimeout(1000); // dejar asentar el re-render inicial
 
-        if (!ok) throw new Error('No encontré el select2 de producto vacío para la carga manual');
-        await this.page.click('[data-cargar-aqui="1"]');
-        await this.page.evaluate(() => {
-            const el = document.querySelector('[data-cargar-aqui="1"]');
-            if (el) el.removeAttribute('data-cargar-aqui');
-        });
+        const choice = this.page.locator('.select2-container.productoId .select2-choice').first();
+        try {
+            await choice.waitFor({ state: 'visible', timeout: 15000 });
+            await choice.click();
+        } catch (e) {
+            const info = await this.page.evaluate(() =>
+                Array.from(document.querySelectorAll('.select2-container')).map(c => {
+                    const ch = c.querySelector('.select2-chosen');
+                    return `[${c.className}] "${ch ? ch.textContent.trim().slice(0, 20) : ''}"`;
+                }).join('  ||  ')
+            );
+            throw new Error('No pude abrir el select2 de producto (.productoId). Select2 en la página: ' + (info || '(ninguno)') + ' | ' + e.message);
+        }
+
         await this.page.waitForTimeout(500);
     }
 
@@ -101,7 +100,16 @@ class ProductLoader {
         await this.abrirSelectProductoVacio();
         await this.page.keyboard.type(codigoInterno);
         await this.page.waitForTimeout(3000);
-        await this.page.keyboard.press('Enter');
+
+        // Elegir el primer resultado de la lista del select2 (más confiable que
+        // Enter, que a veces "no queda" si el resultado no llegó a resaltarse).
+        const resultado = this.page.locator('.select2-results li.select2-result-selectable').first();
+        try {
+            await resultado.waitFor({ state: 'visible', timeout: 5000 });
+            await resultado.click();
+        } catch (e) {
+            await this.page.keyboard.press('Enter'); // respaldo
+        }
         await this.page.waitForTimeout(3000);
 
         return await this.leerPrecioNuevo(antes);

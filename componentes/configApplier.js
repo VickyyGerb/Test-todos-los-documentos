@@ -12,12 +12,9 @@ class ConfigApplier {
     }
 
     async leerPrecios() {
-        // El precio CON IVA de cada producto está en el input cuyo name termina
-        // en "].TotalIVA". El prefijo de la tabla cambia según el documento
-        // (ListaProductoVenta, ListaProductoPresupuestoVenta, etc.), así que
-        // matcheamos el patrón y excluimos "Libre". Se filtra precio 0 (fila vacía).
+        
         const precios = await this.page.evaluate(() => {
-            const reId = /^(ListaProducto(?!Libre)\w*Venta)\[(.+?)\]\.ProductoId$/;
+            const reId = /^(ListaProducto(?!Libre)\w*?)\[(.+?)\]\.ProductoId$/;
             const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
             const IVA = 0.21; // presupuestos no guardan el IVA por línea: lo calculamos
             const precioConIva = (prefijo, guid) => {
@@ -41,11 +38,9 @@ class ConfigApplier {
     }
 
     async aplicarDescuentoPorItem(valor) {
-        // "% Bon./Rec." es el campo Bonificacion de cada producto. Recorremos
-        // producto por producto (solo los cargados, TotalIVA > 0) y escribimos el
-        // valor en esa columna. Agnóstico al tipo de documento.
+        
         const items = await this.page.evaluate(() => {
-            const reId = /^(ListaProducto(?!Libre)\w*Venta)\[(.+?)\]\.ProductoId$/;
+            const reId = /^(ListaProducto(?!Libre)\w*?)\[(.+?)\]\.ProductoId$/;
             const out = [];
             document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
                 const m = inp.name.match(reId);

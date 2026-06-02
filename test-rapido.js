@@ -113,7 +113,7 @@ if (!urlExcel) {
         // ProductoId (existe en todo documento) y leemos TotalIVA si existe
         // (facturas → con IVA) o, si no, Total (presupuestos → sin IVA por línea).
         const preciosDespues = await page.evaluate(() => {
-            const reId = /^(ListaProducto(?!Libre)\w*Venta)\[(.+?)\]\.ProductoId$/;
+            const reId = /^(ListaProducto(?!Libre)\w*?)\[(.+?)\]\.ProductoId$/;
             const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
             const IVA = 0.21; // presupuestos no guardan el IVA por línea: lo calculamos
             const precioConIva = (prefijo, guid) => {
