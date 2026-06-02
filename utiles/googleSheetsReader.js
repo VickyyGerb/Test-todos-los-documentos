@@ -18,26 +18,23 @@ async function leerCasosDePrueba(url) {
     }
     
     const csvText = await response.text();
-    
-    const lines = csvText.split('\n');
-    const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
-    
+
+    // Parser de CSV que respeta comillas: las celdas con comas (ej. la columna
+    // Configuraciones) no se rompen. split(',') simple no servía.
+    const filas = parseCsv(csvText);
+    const headers = (filas[0] || []).map(h => h.trim());
+
     console.log('📋 HEADERS (columnas del Excel):', headers);
-    
+
     const casos = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
-        
-        const values = lines[i].split(',');
+
+    for (let i = 1; i < filas.length; i++) {
+        const values = filas[i];
+        if (!values || values.join('').trim() === '') continue;
+
         const row = {};
-        
         for (let j = 0; j < headers.length; j++) {
-            let valor = values[j];
-            if (valor) {
-                valor = valor.replace(/"/g, '').trim();
-            }
-            row[headers[j]] = valor || '';
+            row[headers[j]] = (values[j] || '').trim();
         }
         
         console.log('==================================');
@@ -95,18 +92,49 @@ function convertirConfiguraciones(configString) {
     if (!configString || configString.trim() === '') {
         return {};
     }
-    
+
     const configs = {};
-    const pares = configString.split(',');
-    
-    for (const par of pares) {
-        const [clave, valor] = par.split(':');
+    // Formato: clave: valor, clave: valor, ...  (separadas por coma)
+    for (const par of configString.split(',')) {
+        const idx = par.indexOf(':');
+        if (idx === -1) continue;
+        const clave = par.slice(0, idx).replace(/"/g, '').trim();
+        const valor = par.slice(idx + 1).replace(/"/g, '').trim();
         if (clave && valor) {
-            configs[clave.trim()] = valor.trim();
+            configs[clave] = valor;
         }
     }
-    
+
     return configs;
+}
+
+// Parser de CSV: respeta comillas dobles (celdas con comas o saltos de línea)
+// y comillas escapadas (""). Devuelve un array de filas (cada fila, array de celdas).
+function parseCsv(text) {
+    const filas = [];
+    let fila = [];
+    let celda = '';
+    let entreComillas = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (entreComillas) {
+            if (ch === '"') {
+                if (text[i + 1] === '"') { celda += '"'; i++; } // comilla escapada
+                else entreComillas = false;
+            } else {
+                celda += ch;
+            }
+        } else {
+            if (ch === '"') entreComillas = true;
+            else if (ch === ',') { fila.push(celda); celda = ''; }
+            else if (ch === '\n') { fila.push(celda); filas.push(fila); fila = []; celda = ''; }
+            else if (ch === '\r') { /* ignorar CR */ }
+            else celda += ch;
+        }
+    }
+    if (celda !== '' || fila.length > 0) { fila.push(celda); filas.push(fila); }
+    return filas;
 }
 
 module.exports = { leerCasosDePrueba };

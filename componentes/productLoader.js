@@ -97,22 +97,39 @@ class ProductLoader {
     async cargarManual(codigoInterno, cantidad = 1) {
         const antes = await this.snapshotGuids();
 
-        await this.abrirSelectProductoVacio();
-        await this.page.keyboard.type(codigoInterno);
-        await this.page.waitForTimeout(3000);
+        // Reintenta una vez si el producto no queda (el re-render del select2 a
+        // veces hace que la selección no se confirme).
+        for (let intento = 1; intento <= 2; intento++) {
+            await this.abrirSelectProductoVacio();
 
-        // Elegir el primer resultado de la lista del select2 (más confiable que
-        // Enter, que a veces "no queda" si el resultado no llegó a resaltarse).
-        const resultado = this.page.locator('.select2-results li.select2-result-selectable').first();
-        try {
-            await resultado.waitFor({ state: 'visible', timeout: 5000 });
-            await resultado.click();
-        } catch (e) {
-            await this.page.keyboard.press('Enter'); // respaldo
+            // Escribir en el buscador del dropdown activo de select2 (#select2-drop).
+            // Si no se puede ubicar, respaldo tipeando al foco.
+            const search = this.page.locator('#select2-drop input.select2-input').first();
+            try {
+                await search.waitFor({ state: 'visible', timeout: 5000 });
+                await search.fill(codigoInterno);
+            } catch (e) {
+                await this.page.keyboard.type(codigoInterno);
+            }
+            await this.page.waitForTimeout(3000);
+
+            // Elegir el primer resultado seleccionable (más confiable que Enter).
+            const resultado = this.page.locator('.select2-results li.select2-result-selectable').first();
+            try {
+                await resultado.waitFor({ state: 'visible', timeout: 6000 });
+                await resultado.click();
+            } catch (e) {
+                await this.page.keyboard.press('ArrowDown');
+                await this.page.keyboard.press('Enter');
+            }
+            await this.page.waitForTimeout(3000);
+
+            const precio = await this.leerPrecioNuevo(antes);
+            if (precio > 0) return precio;
+            console.log(`   ⚠️ Manual intento ${intento}: el producto no quedó, reintento...`);
         }
-        await this.page.waitForTimeout(3000);
 
-        return await this.leerPrecioNuevo(antes);
+        return 0;
     }
 
     async cargarPorCodigoBarra(codigoBarra) {
