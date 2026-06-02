@@ -105,27 +105,22 @@ class ConfigApplier {
                 break;
                 
             case 'cotizacion': {
-                // ===== DIAGNÓSTICO TEMPORAL: campos de cotización/cambio visibles =====
-                const diagC = await this.page.evaluate(() => {
-                    const out = [];
-                    document.querySelectorAll('input[name], select[name]').forEach(el => {
-                        const t = (el.name + ' ' + el.id + ' ' + (el.placeholder || '')).toLowerCase();
-                        if (/(cotiza|cambio|tasa|moneda|divisa)/.test(t)) {
-                            out.push(`name="${el.name}" id="${el.id}" type="${el.type || ''}" value="${el.value}" visible=${el.offsetParent !== null}`);
-                        }
-                    });
-                    return out.join('\n') || '(no encontré campos de cotización/cambio)';
-                });
-                require('fs').writeFileSync('debug-cotizacion.txt', diagC);
-                console.log('   🔎 debug-cotizacion.txt escrito');
-                // ===== FIN DIAGNÓSTICO =====
-                // El campo editable de cotización es #NuevaCotizacionDolar (el
-                // #CotizacionDolar es solo display). Llenar + Tab para recalcular.
-                await this.page.fill('#NuevaCotizacionDolar', valor);
-                await this.page.keyboard.press('Tab');
-                await this.page.waitForTimeout(1000);
-                await this.leerPrecios();
-                console.log(`   ✅ Cotización aplicada: ${valor}`);
+                // La cotización solo es editable con moneda extranjera elegida. El
+                // campo visible/editable es CotizacionDolarGeneral (NuevaCotizacionDolar
+                // queda oculto; CotizacionDolar es solo display). Llenar + Tab para
+                // recalcular. Si no está visible (sin moneda extranjera), se avisa.
+                try {
+                    const cot = this.page.locator('input[name="CotizacionDolar"]:visible').first();
+                    await cot.waitFor({ state: 'visible', timeout: 5000 });
+                    await cot.evaluate(el => el.removeAttribute('readonly'));
+                    await cot.fill(String(valor));
+                    await this.page.keyboard.press('Tab');
+                    await this.page.waitForTimeout(1500);
+                    await this.leerPrecios();
+                    console.log(`   ✅ Cotización aplicada: ${valor}`);
+                } catch (e) {
+                    console.log(`   ⚠️ No pude aplicar cotización (¿el caso tiene moneda extranjera?): ${e.message}`);
+                }
                 break;
             }
                 
