@@ -109,39 +109,20 @@ if (!urlExcel) {
 
         await page.waitForTimeout(3000);
 
+        // Leer el precio CON IVA de cada producto cargado.
+        // En la tabla de productos (ListaProductoVenta) cada fila tiene el precio
+        // con IVA en el input cuyo name termina en "].TotalIVA". Se excluye la
+        // fila vacía de template filtrando precio 0.
         const preciosDespues = await page.evaluate(() => {
+            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.'));
             const resultados = [];
-            const filas = document.querySelectorAll('table tbody tr');
-            
-            console.log('Filas encontradas:', filas.length);
-            
-            for (let i = 0; i < filas.length; i++) {
-                const fila = filas[i];
-                const celdas = fila.querySelectorAll('td');
-                console.log(`Fila ${i+1} - Cantidad de celdas:`, celdas.length);
-                
-                for (let j = 0; j < celdas.length; j++) {
-                    const texto = celdas[j].textContent.trim();
-                    if (texto && texto !== '') {
-                        console.log(`  Celda ${j+1}: "${texto}"`);
-                    }
+            const inputs = document.querySelectorAll('input[name^="ListaProductoVenta["][name$="].TotalIVA"]');
+            inputs.forEach(inp => {
+                const precio = aNumero(inp.value);
+                if (!isNaN(precio) && precio > 0) {
+                    resultados.push(precio);
                 }
-                
-                // Buscar la última celda que tenga número de precio
-                for (let j = celdas.length - 1; j >= 0; j--) {
-                    const texto = celdas[j].textContent.trim();
-                    const match = texto.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/);
-                    if (match) {
-                        const numero = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
-                        if (numero > 0 && numero < 1000000) {
-                            resultados.push(numero);
-                            console.log(`  PRECIO ENCONTRADO: ${numero} en celda ${j+1}`);
-                            break;
-                        }
-                    }
-                }
-            }
-            
+            });
             return resultados;
         });
 

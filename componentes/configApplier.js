@@ -13,31 +13,20 @@ class ConfigApplier {
 
     async leerPrecios() {
         // No usamos Tab con IDs #select2-chosen-N fijos: después de aplicar una
-        // configuración las filas se vuelven a renderizar, select2 reinicia su
-        // contador y esos IDs quedan obsoletos (se saltean filas o se lee la
-        // equivocada). Leemos los precios directo de la tabla, igual que hace
-        // test-rapido.js, así es inmune a los IDs y al orden de tabulación.
+        // configuración las filas se vuelven a renderizar y esos IDs quedan
+        // obsoletos. El precio CON IVA de cada producto está en el input cuyo
+        // name termina en "].TotalIVA" dentro de ListaProductoVenta. Se excluye
+        // la fila vacía de template filtrando precio 0.
         const precios = await this.page.evaluate(() => {
+            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.'));
             const resultados = [];
-            const filas = document.querySelectorAll('table tbody tr');
-
-            for (const fila of filas) {
-                const celdas = fila.querySelectorAll('td');
-
-                // Buscar de derecha a izquierda la última celda con formato de precio
-                for (let j = celdas.length - 1; j >= 0; j--) {
-                    const texto = celdas[j].textContent.trim();
-                    const match = texto.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/);
-                    if (match) {
-                        const numero = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
-                        if (numero > 0 && numero < 1000000) {
-                            resultados.push(numero);
-                            break;
-                        }
-                    }
+            const inputs = document.querySelectorAll('input[name^="ListaProductoVenta["][name$="].TotalIVA"]');
+            inputs.forEach(inp => {
+                const precio = aNumero(inp.value);
+                if (!isNaN(precio) && precio > 0) {
+                    resultados.push(precio);
                 }
-            }
-
+            });
             return resultados;
         });
 
