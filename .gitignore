@@ -4,3 +4,5 @@ dist/
 playwright-report/
 test-results/
 coverage/debug-tabla.txt
+debug-select2.txt
+debug-presupuesto.txt

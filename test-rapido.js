@@ -109,19 +109,25 @@ if (!urlExcel) {
 
         await page.waitForTimeout(3000);
 
-        // Leer el precio CON IVA de cada producto cargado.
-        // En la tabla de productos (ListaProductoVenta) cada fila tiene el precio
-        // con IVA en el input cuyo name termina en "].TotalIVA". Se excluye la
-        // fila vacía de template filtrando precio 0.
+        // Leer el precio de cada producto cargado. Detectamos los productos por
+        // ProductoId (existe en todo documento) y leemos TotalIVA si existe
+        // (facturas → con IVA) o, si no, Total (presupuestos → sin IVA por línea).
         const preciosDespues = await page.evaluate(() => {
-            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.'));
+            const reId = /^(ListaProducto(?!Libre)\w*Venta)\[(.+?)\]\.ProductoId$/;
+            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
+            const IVA = 0.21; // presupuestos no guardan el IVA por línea: lo calculamos
+            const precioConIva = (prefijo, guid) => {
+                const tIva = document.querySelector(`input[name="${prefijo}[${guid}].TotalIVA"]`);
+                if (tIva) return aNumero(tIva.value);
+                const tot = document.querySelector(`input[name="${prefijo}[${guid}].Total"]`);
+                return tot ? Math.round(aNumero(tot.value) * (1 + IVA) * 100) / 100 : 0;
+            };
             const resultados = [];
-            const inputs = document.querySelectorAll('input[name^="ListaProductoVenta["][name$="].TotalIVA"]');
-            inputs.forEach(inp => {
-                const precio = aNumero(inp.value);
-                if (!isNaN(precio) && precio > 0) {
-                    resultados.push(precio);
-                }
+            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
+                const m = inp.name.match(reId);
+                if (!m || !inp.value || inp.value.trim() === '') return;
+                const precio = precioConIva(m[1], m[2]);
+                if (precio > 0) resultados.push(precio);
             });
             return resultados;
         });

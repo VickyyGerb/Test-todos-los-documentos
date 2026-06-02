@@ -12,26 +12,60 @@ class ConfigApplier {
     }
 
     async leerPrecios() {
-        // No usamos Tab con IDs #select2-chosen-N fijos: después de aplicar una
-        // configuración las filas se vuelven a renderizar y esos IDs quedan
-        // obsoletos. El precio CON IVA de cada producto está en el input cuyo
-        // name termina en "].TotalIVA" dentro de ListaProductoVenta. Se excluye
-        // la fila vacía de template filtrando precio 0.
+        // El precio CON IVA de cada producto está en el input cuyo name termina
+        // en "].TotalIVA". El prefijo de la tabla cambia según el documento
+        // (ListaProductoVenta, ListaProductoPresupuestoVenta, etc.), así que
+        // matcheamos el patrón y excluimos "Libre". Se filtra precio 0 (fila vacía).
         const precios = await this.page.evaluate(() => {
-            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.'));
+            const reId = /^(ListaProducto(?!Libre)\w*Venta)\[(.+?)\]\.ProductoId$/;
+            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
+            const IVA = 0.21; // presupuestos no guardan el IVA por línea: lo calculamos
+            const precioConIva = (prefijo, guid) => {
+                const tIva = document.querySelector(`input[name="${prefijo}[${guid}].TotalIVA"]`);
+                if (tIva) return aNumero(tIva.value);
+                const tot = document.querySelector(`input[name="${prefijo}[${guid}].Total"]`);
+                return tot ? Math.round(aNumero(tot.value) * (1 + IVA) * 100) / 100 : 0;
+            };
             const resultados = [];
-            const inputs = document.querySelectorAll('input[name^="ListaProductoVenta["][name$="].TotalIVA"]');
-            inputs.forEach(inp => {
-                const precio = aNumero(inp.value);
-                if (!isNaN(precio) && precio > 0) {
-                    resultados.push(precio);
-                }
+            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
+                const m = inp.name.match(reId);
+                if (!m || !inp.value || inp.value.trim() === '') return;
+                const precio = precioConIva(m[1], m[2]);
+                if (precio > 0) resultados.push(precio);
             });
             return resultados;
         });
 
         console.log(`   Precios obtenidos: ${precios.join(', ')}`);
         return precios;
+    }
+
+    async aplicarDescuentoPorItem(valor) {
+        // "% Bon./Rec." es el campo Bonificacion de cada producto. Recorremos
+        // producto por producto (solo los cargados, TotalIVA > 0) y escribimos el
+        // valor en esa columna. Agnóstico al tipo de documento.
+        const items = await this.page.evaluate(() => {
+            const reId = /^(ListaProducto(?!Libre)\w*Venta)\[(.+?)\]\.ProductoId$/;
+            const out = [];
+            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
+                const m = inp.name.match(reId);
+                if (m && inp.value && inp.value.trim() !== '') out.push({ prefijo: m[1], guid: m[2] });
+            });
+            return out;
+        });
+
+        console.log(`   Aplicando descuento por ítem (${valor}) a ${items.length} producto(s)...`);
+
+        for (const it of items) {
+            const input = this.page.locator(`input[name="${it.prefijo}[${it.guid}].Bonificacion"]`);
+            await input.scrollIntoViewIfNeeded();
+            await input.evaluate(el => el.removeAttribute('readonly')); // por si está soloLectura
+            await input.click();
+            await input.fill(String(valor));
+            await this.page.keyboard.press('Tab'); // blur -> dispara el recálculo
+            await this.page.waitForTimeout(400);
+            console.log(`   ✅ Ítem ${it.guid} -> % Bon./Rec. = ${valor}`);
+        }
     }
 
     async aplicarConfiguracion(nombre, valor, codigoProducto) {
@@ -83,7 +117,15 @@ class ConfigApplier {
                 await this.leerPrecios();
                 console.log(`   ✅ Lista de precios aplicada: ${valor}`);
                 break;
-                
+
+            case 'descuento_item': {
+                await this.aplicarDescuentoPorItem(valor);
+                const preciosItem = await this.leerPrecios();
+                console.log(`   Precios después del descuento por ítem: ${preciosItem.join(', ')}`);
+                console.log(`   ✅ Descuento por ítem aplicado: ${valor}`);
+                break;
+            }
+
             default:
                 console.log(`Configuración no implementada: ${nombre}`);
         }
