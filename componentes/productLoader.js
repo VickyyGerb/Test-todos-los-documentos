@@ -200,13 +200,54 @@ class ProductLoader {
     // Pedido, así que quedan exclusivos (pendientes).
     // ========================================================================
     async cargarAsignacionMultiplePedido(codigoInterno, cantidad = 1) {
-        console.log('   ⏳ Pedido (asignación múltiple): pendiente de implementar — se omite');
-        return 0;
+        const antes = await this.snapshotGuids();
+
+        // En Pedido el link "Asignación Múltiple" vive en un dropdown colapsado
+        // (Playwright lo ve "not visible"). Lo disparamos por JS: su onclick
+        // BuscarProducto(false) abre el modal igual.
+        await this.page.evaluate(() => {
+            const link = Array.from(document.querySelectorAll('a')).find(a => /Asignación Múltiple/i.test(a.textContent));
+            if (link) link.click();
+        });
+        await this.page.waitForTimeout(1500);
+
+        await this.page.fill('#NombreProducto', codigoInterno);
+        await this.page.waitForTimeout(500);
+
+        await this.page.keyboard.press('Enter');
+        await this.page.waitForTimeout(2000);
+
+        const filaProducto = this.page.locator('table tbody tr.odd');
+        await filaProducto.waitFor({ state: 'visible', timeout: 5000 });
+
+        await filaProducto.locator('input[type="checkbox"]').click();
+        await this.page.waitForTimeout(500);
+
+        await this.page.getByRole('button', { name: 'Agregar' }).click();
+        await this.page.waitForTimeout(3000);
+
+        return await this.leerPrecioNuevo(antes);
     }
 
     async cargarDesdePlantillaPedido(nombrePlantilla) {
-        console.log('   ⏳ Pedido (plantilla): pendiente de implementar — se omite');
-        return 0;
+        const antes = await this.snapshotGuids();
+
+        // En Pedido el link "Plantillas" (#btnAbrirModal) también está en el
+        // dropdown colapsado; lo disparamos por JS para abrir el modal.
+        await this.page.evaluate(() => {
+            const link = document.getElementById('btnAbrirModal');
+            if (link) link.click();
+        });
+        await this.page.waitForTimeout(2000);
+
+        await this.page.click('#PlantillasLista_chosen .chosen-single.chosen-default');
+        await this.page.keyboard.press('ArrowDown');
+        await this.page.keyboard.press('Enter');
+        await this.page.waitForTimeout(3000);
+        await this.page.locator('.modal-footer:has-text("Asociar") a.btn-success').click();
+        await this.page.waitForTimeout(3000);
+
+        return await this.leerPrecioNuevo(antes);
     }
 
     async cargar(metodo, datos) {

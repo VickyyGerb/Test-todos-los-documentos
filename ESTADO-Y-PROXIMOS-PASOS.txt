@@ -1,0 +1,141 @@
+========================================================================
+ESTADO DEL PROYECTO — Test de carga de productos (Playwright)
+Última actualización: 2026-06-02
+========================================================================
+
+QUÉ HACE EL PROYECTO
+--------------------
+Automatización con Playwright que valida que un MISMO producto, cargado por
+distintos métodos (manual, código de barra, asignación múltiple, plantilla),
+dé el MISMO precio — en distintos tipos de documento (factura, presupuesto,
+pedido, etc.) y aplicando configuraciones (descuentos, moneda, cotización,
+lista de precios). Los casos se leen de un Google Sheet.
+
+CÓMO SE CORRE
+-------------
+  node test-rapido.js "https://docs.google.com/spreadsheets/d/<ID>/edit#gid=<GID>"
+- El Sheet debe estar compartido como "Cualquiera con el enlace - Lector".
+- Pasar la URL con el #gid de la pestaña que tiene los casos (lo toma de la URL).
+- Toda la salida queda guardada en  resultado-corrida.log  (un banner por caso).
+- El .env (URL_BASE, ADMIN_USER, ADMIN_PASS) tiene que existir para loguear.
+
+
+========================================================================
+LO QUE SE HIZO HOY
+========================================================================
+- Lectura de precios CON IVA, agnóstica al documento:
+    * Factura: lee el campo TotalIVA directo.
+    * Presupuesto / Pedido: no guardan IVA por línea -> se calcula Total x 1.21
+      (IVA asumido = 21%, constante en el código).
+- Carga SIN IDs select2 fijos (#select2-chosen-N): ahora ubica el select2 de
+  producto por su clase .productoId y detecta la fila nueva dinámicamente.
+- Selectores de producto agnósticos al documento. Tablas reconocidas:
+    ListaProductoVenta (factura), ListaProductoPresupuestoVenta (presupuesto),
+    ProductosLista (pedido).  (excluye las de "productos libres")
+- Configuraciones implementadas y andando:
+    * descuento_item   (incluso negativo = recargo)
+    * descuento_global (campo #Descuento; se verifica por totales del documento)
+    * moneda           (#MonedaId)
+    * cotizacion       (#CotizacionDolar visible, sólo con moneda extranjera)
+    * lista_precios    (#ListaDePreciosVentaId)
+- Multi-configuración en una celda (separadas por coma) + valores con coma
+  decimal (ej. "descuento_item: 10,5") sin romper el parseo.
+- CSV parseado respetando comillas (celdas con comas no se rompen).
+- gid tomado desde la URL del Sheet (si no hay, exporta la primera hoja).
+- Log de corrida a archivo (resultado-corrida.log) con banner por caso.
+- Corrida RESILIENTE: si un método no carga, se OMITE y la corrida sigue
+  (no se tanca ni hay que cerrar el navegador). Más rápida (slowMo 80).
+- Validación de CuentaID (si no es numérico, corta con mensaje claro).
+- SOPORTE DE PEDIDO: manual y código de barra funcionan (misma carga que el
+  resto; sólo cambiaba el nombre de la tabla = ProductosLista).
+- ProductLoader "document-aware": recibe el documento y rutea Pedido a métodos
+  exclusivos donde hace falta (asignación múltiple y plantilla).
+
+
+========================================================================
+ESTADO ACTUAL POR DOCUMENTO / MÉTODO
+========================================================================
+                       Manual  CodBarra  AsignMult  Plantilla   Configs
+  factura                OK      OK        OK         OK          5/5 OK
+  presupuesto            OK      OK        OK         OK          OK (sin moneda)
+  pedido                 OK      OK        ¡VERIFICAR! ¡VERIFICAR!  OK (sin moneda)
+  venta_unificada        ?       ?         ?          ?           ?
+  remito                 ?       ?         ?          ?           ?
+
+  (OK = probado y andando; ? = sin probar)
+
+NOTA: La carga MANUAL es un poco "flaky" (a veces falla el 1er intento por
+re-render del select2), pero tiene REINTENTO automático + la resiliencia la
+cubre, así que no bloquea.
+
+
+========================================================================
+DÓNDE QUEDAMOS  (commiteado como WIP — FALTA VERIFICAR)  <<< RETOMAR ACÁ
+========================================================================
+Se implementaron los métodos de Pedido para ASIGNACIÓN MÚLTIPLE y PLANTILLA
+(en componentes/productLoader.js, sección "EXCLUSIVA DE PEDIDO"). El primer
+intento (clickear el dropdown "Productos/Servicios") fallaba porque los links
+quedaban "not visible"; se cambió a dispararlos por JS (su onclick/href abre
+el modal igual). Quedó COMMITEADO como WIP, pero NO se probó todavía.
+
+>>> PRIMER PASO DE MAÑANA: correr esta fila de Pedido y mirar el log:
+    1268  pedido  0001  00011  111111  NO  NO  SI  SI  Test
+    Esperar:  asignación múltiple -> Precio: 18150
+              plantilla           -> Precio: 18150
+    - Si andan los dos -> Pedido COMPLETO (4 métodos). Confirmar/commitear.
+    - Si falla alguno  -> revisar resultado-corrida.log: probablemente el modal
+      de Pedido tenga un campo/botón con otro nombre. Misma técnica de siempre:
+      diagnóstico (volcar el DOM a debug-*.txt) para ver los selectores reales.
+
+
+========================================================================
+CON QUÉ SEGUIR (para cubrir todo)
+========================================================================
+1. [EN CURSO] Verificar Pedido: asignación múltiple + plantilla. Commitear.
+
+2. [FALTA] Probar venta_unificada y remito (los 2 documentos sin probar).
+   Pueden necesitar ajustes como Pedido (tabla/botones con otro nombre). Usar
+   el mismo método: correr una fila, mirar resultado-corrida.log, y si hace
+   falta, un diagnóstico (volcar el DOM a un debug-*.txt) para ver los nombres.
+
+3. [PENDIENTE] Configuraciones que faltan:
+   - rango de precios
+   - reglas de descuento
+   (Se dejaron para cuando se confirme cómo funcionan en el sistema.)
+
+4. [MEJORA] Carga manual: dejarla 100% (hoy anda con reintento + resiliencia).
+   Es la única con flakiness (re-render del select2).
+
+5. [VALORES] Revisar casos límite ya armados (descuento 0/100/decimal/negativo)
+   y los negativos (CuentaID inválido, producto inexistente, sin métodos, etc.).
+   El set completo de casos está en la tabla que se armó (35 casos).
+
+
+========================================================================
+PENDIENTE IMPORTANTE DE SEGURIDAD
+========================================================================
+>>> La contraseña de admin estuvo PÚBLICA en GitHub (se sacó del repo, pero
+    quien la vio pudo copiarla). HAY QUE CAMBIARLA en el sistema Fidel.
+    El .env quedó fuera de git (gitignored) y ya no se sube.
+
+
+========================================================================
+NOTAS TÉCNICAS ÚTILES
+========================================================================
+- Archivos clave:
+    test-rapido.js .............. orquestador (login -> cargar -> configs -> verificar)
+    utiles/login.js ............. login admin + ID de cuenta (valida CuentaID)
+    utiles/googleSheetsReader.js  baja el Sheet como CSV y parsea los casos
+    paginas/documents.js ........ navega a cada tipo de documento
+    componentes/productLoader.js  carga de productos (4 métodos + sección Pedido)
+    componentes/configApplier.js  aplica las configuraciones
+- Detección de productos (regex, en 5 lugares):
+    /^(?:ListaProducto(?!Libre)\w*?|ProductosLista)\[<guid>\]\.<campo>$/
+- Precio con IVA: TotalIVA si existe; si no, Total x 1.21 (IVA = 21%, ajustable).
+- Diagnósticos: patrón de escribir un debug-*.txt (ignorado por git) para
+  inspeccionar el DOM cuando algo no se encuentra. Borrar al terminar.
+- La carpeta de trabajo REAL es:
+    D:\Users\Usuario\Documents\Playwright\Carga de productos repo\CargaDeProductos
+  (hay una copia vieja en ...\Automatizaciones\... que NO se usa)
+- Repo GitHub: https://github.com/VickyyGerb/CargaDeProductos
+========================================================================
