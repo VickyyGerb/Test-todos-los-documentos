@@ -5,26 +5,33 @@ class ProductLoader {
         this.page = page;
     }
 
-    async obtenerPrecioConTab() {
-        // Cerrar cualquier dropdown abierto
-        await this.page.keyboard.press('Escape');
-        await this.page.waitForTimeout(200);
-        await this.page.keyboard.press('Tab');
-        await this.page.keyboard.press('Tab');
-        await this.page.keyboard.press('Tab');
-        await this.page.keyboard.press('Tab');
-        await this.page.keyboard.press('Tab');
-        
-        const valor = await this.page.evaluate(() => {
-            const activeElement = document.activeElement;
-            return activeElement ? activeElement.value : '0';
-        });
-        
-        console.log('   Valor capturado con Tab:', valor);
-        
-        const precioLimpio = valor.replace(/\./g, '').replace(',', '.').trim();
-        return parseFloat(precioLimpio) || 0;
-    }
+   async obtenerPrecioConTab() {
+    // Cerrar dropdown abierto
+    await this.page.keyboard.press('Escape');
+    await this.page.waitForTimeout(100);
+    
+    await this.page.keyboard.press('Tab');
+    await this.page.waitForTimeout(100);
+    
+    await this.page.keyboard.press('Tab');
+    await this.page.waitForTimeout(100);
+     await this.page.keyboard.press('Tab');
+    await this.page.waitForTimeout(100);
+     await this.page.keyboard.press('Tab');
+    await this.page.waitForTimeout(100);
+     await this.page.keyboard.press('Tab');
+    await this.page.waitForTimeout(100);
+    
+    const valor = await this.page.evaluate(() => {
+        const activeElement = document.activeElement;
+        return activeElement ? activeElement.value : '0';
+    });
+    
+    console.log('   Valor capturado con Tab:', valor);
+    
+    const precioLimpio = valor.replace(/\./g, '').replace(',', '.').trim();
+    return parseFloat(precioLimpio) || 0;
+}
 
     async cargarManual(codigoInterno, cantidad = 1) {   
         await this.page.click('#select2-chosen-6');
@@ -40,7 +47,7 @@ class ProductLoader {
         await this.page.keyboard.press('F6');
         await this.page.keyboard.type(codigoBarra);
         await this.page.waitForTimeout(2000);
-        await this.page.keyboard.press('F8');
+        await this.page.keyboard.press('F8', { force: true });
         await this.page.waitForTimeout(3000);
         
         await this.page.click('#select2-chosen-9');
