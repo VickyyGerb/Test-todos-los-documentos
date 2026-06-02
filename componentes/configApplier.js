@@ -1,9 +1,6 @@
-const { ProductLoader } = require('./productLoader');
-
 class ConfigApplier {
     constructor(page) {
         this.page = page;
-        this.productLoader = new ProductLoader(page);
     }
 
     async aplicar(configuraciones, codigoProducto) {
@@ -14,51 +11,39 @@ class ConfigApplier {
         }
     }
 
-    async leerPreciosConTab(codigoProducto) {
-    const precios = [];
-    
-    // Obtener todos los selectores que contienen el código del producto, en el orden de la tabla
-    const selectoresEncontrados = await this.page.evaluate((codigo) => {
-        const resultados = [];
-        // Buscar dentro de cada fila de la tabla
-        const filas = document.querySelectorAll('table tbody tr');
-        
-        for (const fila of filas) {
-            const selector = fila.querySelector('.select2-chosen');
-            if (selector && selector.textContent.includes(codigo)) {
-                resultados.push(selector.id ? `#${selector.id}` : null);
+    async leerPrecios() {
+        // No usamos Tab con IDs #select2-chosen-N fijos: después de aplicar una
+        // configuración las filas se vuelven a renderizar, select2 reinicia su
+        // contador y esos IDs quedan obsoletos (se saltean filas o se lee la
+        // equivocada). Leemos los precios directo de la tabla, igual que hace
+        // test-rapido.js, así es inmune a los IDs y al orden de tabulación.
+        const precios = await this.page.evaluate(() => {
+            const resultados = [];
+            const filas = document.querySelectorAll('table tbody tr');
+
+            for (const fila of filas) {
+                const celdas = fila.querySelectorAll('td');
+
+                // Buscar de derecha a izquierda la última celda con formato de precio
+                for (let j = celdas.length - 1; j >= 0; j--) {
+                    const texto = celdas[j].textContent.trim();
+                    const match = texto.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/);
+                    if (match) {
+                        const numero = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+                        if (numero > 0 && numero < 1000000) {
+                            resultados.push(numero);
+                            break;
+                        }
+                    }
+                }
             }
-        }
-        return resultados.filter(r => r !== null);
-    }, codigoProducto);
-    
-    console.log(`   Selectores encontrados (orden de tabla): ${selectoresEncontrados.join(', ')}`);
-    
-    // Procesar cada selector individualmente, cerrando el dropdown antes de cada uno
-    for (let i = 0; i < selectoresEncontrados.length; i++) {
-        const selector = selectoresEncontrados[i];
-        
-        // Cerrar cualquier dropdown abierto
-        await this.page.keyboard.press('Escape');
-        await this.page.waitForTimeout(200);
-        
-        // Hacer clic en el selector
-        await this.page.click(selector);
-        await this.page.waitForTimeout(200);
-        
-        // Cerrar el dropdown que se abrió
-        await this.page.keyboard.press('Escape');
-        await this.page.waitForTimeout(200);
-        
-        // Obtener el precio usando Tab (desde el selector correcto)
-        const precio = await this.productLoader.obtenerPrecioConTab();
-        precios.push(precio);
-        console.log(`   Producto ${i+1} (${selector}) - Precio: ${precio}`);
+
+            return resultados;
+        });
+
+        console.log(`   Precios obtenidos: ${precios.join(', ')}`);
+        return precios;
     }
-    
-    console.log(`   Precios obtenidos: ${precios.join(', ')}`);
-    return precios;
-}
 
     async aplicarConfiguracion(nombre, valor, codigoProducto) {
         console.log(`⚙️ Aplicando configuración: ${nombre} = ${valor}`);
@@ -80,7 +65,7 @@ class ConfigApplier {
                     }, valor);
                     await this.page.waitForTimeout(1000);
                     
-                    const precios = await this.leerPreciosConTab(codigoProducto);
+                    const precios = await this.leerPrecios();
                     console.log(`   Precios después del descuento: ${precios.join(', ')}`);
                     console.log(`   ✅ Descuento global aplicado: ${valor}`);
                 } catch (e) {
@@ -92,13 +77,13 @@ class ConfigApplier {
                 await this.page.locator('#MonedaId_chosen .chosen-single').click();        
                 await this.page.keyboard.type(valor); 
                 await this.page.keyboard.press("Enter");
-                await this.leerPreciosConTab(codigoProducto);
+                await this.leerPrecios();
                 console.log(`   ✅ Moneda aplicada: ${valor}`);
                 break;
                 
             case 'cotizacion':
                 await this.page.fill('#cotizacion', valor);
-                await this.leerPreciosConTab(codigoProducto);
+                await this.leerPrecios();
                 console.log(`   ✅ Cotización aplicada: ${valor}`);
                 break;
                 
@@ -106,7 +91,7 @@ class ConfigApplier {
                 await this.page.click('#ListaDePreciosVentaId_chosen .chosen-single');
                 await this.page.keyboard.type(valor);
                 await this.page.keyboard.press('Enter');
-                await this.leerPreciosConTab(codigoProducto);
+                await this.leerPrecios();
                 console.log(`   ✅ Lista de precios aplicada: ${valor}`);
                 break;
                 
