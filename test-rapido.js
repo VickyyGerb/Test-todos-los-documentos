@@ -5,6 +5,17 @@ const { ProductLoader } = require('./componentes/productLoader');
 const { DocumentsPage } = require('./paginas/documents');
 const { ConfigApplier } = require('./componentes/configApplier');
 require('dotenv').config();
+const fs = require('fs');
+const util = require('util');
+
+// Guardar TODO lo que se imprime en la terminal a un archivo, para poder
+// analizar la corrida completa (cada caso con su banner). Se sobrescribe en
+// cada corrida.
+const logStream = fs.createWriteStream('resultado-corrida.log', { flags: 'w' });
+const _log = console.log.bind(console);
+const _err = console.error.bind(console);
+console.log = (...a) => { _log(...a); logStream.write(util.format(...a) + '\n'); };
+console.error = (...a) => { _err(...a); logStream.write(util.format(...a) + '\n'); };
 
 const urlExcel = process.argv[2];
 
@@ -20,10 +31,18 @@ if (!urlExcel) {
     console.log(`✅ Se encontraron ${casos.length} casos`);
 
     const browser = await chromium.launch({ headless: false, slowMo: 300 });
-    
+
+    let numeroCaso = 0;
     for (const caso of casos) {
-        console.log(`\n🔍 Probando caso: Cuenta ${caso.cuentaID} - ${caso.documento}`);
-        
+        numeroCaso++;
+        const m = caso.probarMetodos;
+        console.log('\n' + '═'.repeat(72));
+        console.log(`🔍 CASO #${numeroCaso}  |  Cuenta: ${caso.cuentaID}  |  Documento: ${caso.documento}  |  Cliente: ${caso.clienteID}`);
+        console.log(`   Producto: ${caso.producto.codigoInterno} / barra ${caso.producto.codigoBarra}  |  Plantilla: ${caso.plantillaNombre || '-'}`);
+        console.log(`   Métodos:  manual=${m.manual}  codigoBarra=${m.codigoBarra}  asignMultiple=${m.asignMultiple}  plantilla=${m.plantilla}`);
+        console.log(`   Configuraciones: ${JSON.stringify(caso.configuraciones)}`);
+        console.log('═'.repeat(72));
+
         const page = await browser.newPage();
         
         try {

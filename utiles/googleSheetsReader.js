@@ -8,9 +8,15 @@ async function leerCasosDePrueba(url) {
     }
     
     const sheetId = matches[1];
-    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
-    
-    console.log('Descargando desde:', csvUrl);
+
+    // Tomar el gid de la URL si viene (ej. .../edit#gid=123456 o &gid=123456),
+    // así lee la pestaña que tengas abierta. Si no hay gid, exporta la 1ª hoja
+    // (no forzamos gid=0, que falla con 400 si esa pestaña no existe).
+    const gidMatch = url.match(/[#&?]gid=([0-9]+)/);
+    const gidParam = gidMatch ? `&gid=${gidMatch[1]}` : '';
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`;
+
+    console.log('Descargando desde:', csvUrl, gidMatch ? `(gid=${gidMatch[1]})` : '(primera hoja)');
     
     const response = await fetch(csvUrl);
     if (!response.ok) {
@@ -93,9 +99,17 @@ function convertirConfiguraciones(configString) {
         return {};
     }
 
+    // Separar por coma, pero re-unir al par anterior los pedazos que NO tienen
+    // ':' — porque un valor puede tener coma decimal (ej. "descuento_item: 10,5"
+    // se parte en "descuento_item: 10" y "5", y hay que volver a unirlos).
+    const pares = [];
+    for (const token of configString.split(',')) {
+        if (token.includes(':')) pares.push(token);
+        else if (pares.length) pares[pares.length - 1] += ',' + token;
+    }
+
     const configs = {};
-    // Formato: clave: valor, clave: valor, ...  (separadas por coma)
-    for (const par of configString.split(',')) {
+    for (const par of pares) {
         const idx = par.indexOf(':');
         if (idx === -1) continue;
         const clave = par.slice(0, idx).replace(/"/g, '').trim();

@@ -7,3 +7,5 @@ coverage/debug-tabla.txt
 debug-select2.txt
 debug-presupuesto.txt
 debug-pedido.txt
+debug-pedido2.txt
+resultado-corrida.log
