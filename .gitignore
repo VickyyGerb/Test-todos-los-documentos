@@ -3,11 +3,6 @@ node_modules/
 dist/
 playwright-report/
 test-results/
-coverage/debug-tabla.txt
-debug-select2.txt
-debug-presupuesto.txt
-debug-pedido.txt
-debug-pedido2.txt
+coverage/
+debug-*.txt
 resultado-corrida.log
-debug-config.txt
-debug-cotizacion.txt
