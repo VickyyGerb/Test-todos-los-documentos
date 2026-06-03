@@ -55,7 +55,9 @@ class ConfigApplier {
 
         console.log(`   Aplicando descuento por ítem (${valor}) a ${items.length} producto(s)...`);
 
-        for (const it of items) {
+        const esperado = parseFloat(String(valor).replace(',', '.'));
+
+        const ponerBonif = async (it) => {
             const input = this.page.locator(`input[name="${it.prefijo}[${it.guid}].Bonificacion"]`);
             await input.scrollIntoViewIfNeeded();
             await input.evaluate(el => el.removeAttribute('readonly')); // por si está soloLectura
@@ -63,8 +65,30 @@ class ConfigApplier {
             await input.fill(String(valor));
             await this.page.keyboard.press('Tab'); // blur -> dispara el recálculo
             await this.page.waitForTimeout(400);
-            console.log(`   ✅ Ítem ${it.guid} -> % Bon./Rec. = ${valor}`);
+        };
+
+        const bonifActual = async (it) => {
+            const input = this.page.locator(`input[name="${it.prefijo}[${it.guid}].Bonificacion"]`);
+            return parseFloat(((await input.inputValue()) || '').replace(',', '.')) || 0;
+        };
+
+        // El recálculo re-dibuja la tabla y a veces "pierde" el descuento en filas
+        // ya editadas. Pasamos varias veces re-aplicando sólo las que no quedaron.
+        for (let pasada = 1; pasada <= 4; pasada++) {
+            const faltan = [];
+            for (const it of items) {
+                if (await bonifActual(it) !== esperado) faltan.push(it);
+            }
+            if (faltan.length === 0) {
+                console.log(`   ✅ Los ${items.length} ítems quedaron con % Bon./Rec. = ${valor}`);
+                break;
+            }
+            console.log(`   Pasada ${pasada}: ${faltan.length} ítem(s) sin el descuento, re-aplicando...`);
+            for (const it of faltan) await ponerBonif(it);
+            await this.page.waitForTimeout(800);
         }
+
+        await this.page.waitForTimeout(1000); // que se asiente el recálculo final
     }
 
     async aplicarConfiguracion(nombre, valor, codigoProducto) {
@@ -130,13 +154,26 @@ class ConfigApplier {
                 
             case 'lista_precios':
                 try {
-                    await this.page.click('#ListaDePreciosVentaId_chosen .chosen-single');
-                    await this.page.keyboard.type(valor);
-                    await this.page.keyboard.press('Enter');
-                    await this.leerPrecios();
-                    console.log(`   ✅ Lista de precios aplicada: ${valor}`);
+                    const chosen = this.page.locator('#ListaDePreciosVentaId_chosen .chosen-single');
+                    if (await chosen.count()) {
+                        await chosen.click();
+                        await this.page.keyboard.type(valor);
+                        await this.page.keyboard.press('Enter');
+                        await this.leerPrecios();
+                        console.log(`   ✅ Lista de precios aplicada: ${valor}`);
+                    } else {
+                        const cand = await this.page.evaluate(() => {
+                            const out = [];
+                            document.querySelectorAll('select, .chosen-container, .select2-container').forEach(el => {
+                                if (/precio/i.test(`${el.id} ${el.name || ''}`)) out.push(`<${el.tagName.toLowerCase()}> id=${el.id || '-'} name=${el.name || '-'}`);
+                            });
+                            return out;
+                        });
+                        console.log(`   ⚠️ No encontré el "chosen" de lista de precios en este documento.`);
+                        console.log(`   🔎 Candidatos (id/name con "precio"): ${cand.join(' | ') || '(ninguno)'}`);
+                    }
                 } catch (e) {
-                    console.log(`   ⚠️ No pude aplicar lista de precios (¿el documento la tiene?): ${e.message}`);
+                    console.log(`   ⚠️ No pude aplicar lista de precios: ${e.message}`);
                 }
                 break;
 
