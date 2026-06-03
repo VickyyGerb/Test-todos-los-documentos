@@ -1,6 +1,6 @@
 ========================================================================
 ESTADO DEL PROYECTO — Test de carga de productos (Playwright)
-Última actualización: 2026-06-02
+Última actualización: 2026-06-03
 ========================================================================
 
 QUÉ HACE EL PROYECTO
@@ -58,7 +58,7 @@ ESTADO ACTUAL POR DOCUMENTO / MÉTODO
                        Manual  CodBarra  AsignMult  Plantilla   Configs
   factura                OK      OK        OK         OK          5/5 OK
   presupuesto            OK      OK        OK         OK          OK (sin moneda)
-  pedido                 OK      OK        ¡VERIFICAR! ¡VERIFICAR!  OK (sin moneda)
+  pedido                 OK      OK        OK         OK          OK (sin moneda)
   venta_unificada        ?       ?         ?          ?           ?
   remito                 ?       ?         ?          ?           ?
 
@@ -70,30 +70,28 @@ cubre, así que no bloquea.
 
 
 ========================================================================
-DÓNDE QUEDAMOS  (commiteado como WIP — FALTA VERIFICAR)  <<< RETOMAR ACÁ
+DÓNDE QUEDAMOS  <<< RETOMAR ACÁ
 ========================================================================
-Se implementaron los métodos de Pedido para ASIGNACIÓN MÚLTIPLE y PLANTILLA
-(en componentes/productLoader.js, sección "EXCLUSIVA DE PEDIDO"). El primer
-intento (clickear el dropdown "Productos/Servicios") fallaba porque los links
-quedaban "not visible"; se cambió a dispararlos por JS (su onclick/href abre
-el modal igual). Quedó COMMITEADO como WIP, pero NO se probó todavía.
+Pedido quedó COMPLETO y VERIFICADO (4/4 métodos). La fila 1268 se corrió el
+2026-06-03 y los 4 métodos (manual, código de barra, asignación múltiple y
+plantilla) dieron el MISMO precio: 18150. El fix de disparar por JS los links
+del dropdown ("Asignación Múltiple" y #btnAbrirModal/Plantillas) resolvió el
+"element is not visible" que rompía esos dos métodos. Confirmado y commiteado.
 
->>> PRIMER PASO DE MAÑANA: correr esta fila de Pedido y mirar el log:
-    1268  pedido  0001  00011  111111  NO  NO  SI  SI  Test
-    Esperar:  asignación múltiple -> Precio: 18150
-              plantilla           -> Precio: 18150
-    - Si andan los dos -> Pedido COMPLETO (4 métodos). Confirmar/commitear.
-    - Si falla alguno  -> revisar resultado-corrida.log: probablemente el modal
-      de Pedido tenga un campo/botón con otro nombre. Misma técnica de siempre:
-      diagnóstico (volcar el DOM a debug-*.txt) para ver los selectores reales.
+>>> PRÓXIMO PASO: probar venta_unificada y remito (los 2 documentos sin probar).
+    Armar una fila de cada uno en el Sheet (mismo producto 00011 / barra 111111)
+    y correrla. Mirar resultado-corrida.log; si algún método falla, lo más
+    probable es que la tabla de productos o algún botón/modal tenga otro nombre
+    (como pasó con Pedido = ProductosLista). Técnica de siempre: diagnóstico
+    volcando el DOM a un debug-*.txt para ver los selectores reales.
 
 
 ========================================================================
 CON QUÉ SEGUIR (para cubrir todo)
 ========================================================================
-1. [EN CURSO] Verificar Pedido: asignación múltiple + plantilla. Commitear.
+1. [HECHO ✓] Pedido: asignación múltiple + plantilla verificados (4/4 OK).
 
-2. [FALTA] Probar venta_unificada y remito (los 2 documentos sin probar).
+2. [EN CURSO] Probar venta_unificada y remito (los 2 documentos sin probar).
    Pueden necesitar ajustes como Pedido (tabla/botones con otro nombre). Usar
    el mismo método: correr una fila, mirar resultado-corrida.log, y si hace
    falta, un diagnóstico (volcar el DOM a un debug-*.txt) para ver los nombres.
