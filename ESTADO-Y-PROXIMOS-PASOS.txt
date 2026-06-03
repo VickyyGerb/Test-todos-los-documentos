@@ -60,9 +60,15 @@ ESTADO ACTUAL POR DOCUMENTO / MÉTODO
   presupuesto            OK      OK        OK         OK          OK (sin moneda)
   pedido                 OK      OK        OK         OK          OK (sin moneda)
   venta_unificada        ?       ?         ?          ?           ?
-  remito                 ?       ?         ?          ?           ?
+  remito                 OK      N/A       OK         N/A         (sin config)
 
-  (OK = probado y andando; ? = sin probar)
+  (OK = probado y andando; ? = sin probar; N/A = el documento no tiene ese método)
+
+NOTA REMITO: sólo tiene Manual y Asignación Múltiple (no tiene código de barra
+ni plantilla; se omiten a propósito). Remito NO maneja IVA: el precio es el Total
+tal cual (15000), sin el ×1.21 que se aplica a presupuesto/pedido. La asignación
+múltiple de remito usa su propio método (modal #ModalBuscarMultiProducto: poner
+el código en #NombreProducto, blur, tildar el check, Agregar).
 
 NOTA: La carga MANUAL es un poco "flaky" (a veces falla el 1er intento por
 re-render del select2), pero tiene REINTENTO automático + la resiliencia la
@@ -78,12 +84,15 @@ plantilla) dieron el MISMO precio: 18150. El fix de disparar por JS los links
 del dropdown ("Asignación Múltiple" y #btnAbrirModal/Plantillas) resolvió el
 "element is not visible" que rompía esos dos métodos. Confirmado y commiteado.
 
->>> PRÓXIMO PASO: probar venta_unificada y remito (los 2 documentos sin probar).
-    Armar una fila de cada uno en el Sheet (mismo producto 00011 / barra 111111)
-    y correrla. Mirar resultado-corrida.log; si algún método falla, lo más
-    probable es que la tabla de productos o algún botón/modal tenga otro nombre
-    (como pasó con Pedido = ProductosLista). Técnica de siempre: diagnóstico
-    volcando el DOM a un debug-*.txt para ver los selectores reales.
+Remito quedó CERRADO (2026-06-03): Manual y Asignación Múltiple dan 15000 (sin
+IVA). Código de barra y plantilla no existen en remito → se omiten.
+
+>>> PRÓXIMO PASO: probar venta_unificada (el último documento sin probar).
+    Armar una fila en el Sheet (mismo producto 00011 / barra 111111) y correrla.
+    Mirar resultado-corrida.log; si algún método falla, lo más probable es que la
+    tabla de productos o algún botón/modal tenga otro nombre (como pasó con Pedido
+    = ProductosLista y Remito = ModalBuscarMultiProducto). Técnica de siempre:
+    diagnóstico volcando el DOM a un debug-*.txt para ver los selectores reales.
 
 
 ========================================================================
@@ -91,9 +100,12 @@ CON QUÉ SEGUIR (para cubrir todo)
 ========================================================================
 1. [HECHO ✓] Pedido: asignación múltiple + plantilla verificados (4/4 OK).
 
-2. [EN CURSO] Probar venta_unificada y remito (los 2 documentos sin probar).
-   Pueden necesitar ajustes como Pedido (tabla/botones con otro nombre). Usar
-   el mismo método: correr una fila, mirar resultado-corrida.log, y si hace
+1b.[HECHO ✓] Remito: Manual + Asignación Múltiple OK (15000, sin IVA). Barra y
+   plantilla no existen en remito → omitidos.
+
+2. [EN CURSO] Probar venta_unificada (último documento sin probar).
+   Puede necesitar ajustes como Pedido/Remito (tabla/botones con otro nombre).
+   Usar el mismo método: correr una fila, mirar resultado-corrida.log, y si hace
    falta, un diagnóstico (volcar el DOM a un debug-*.txt) para ver los nombres.
 
 3. [PENDIENTE] Configuraciones que faltan:

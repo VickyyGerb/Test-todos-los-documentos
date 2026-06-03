@@ -147,15 +147,17 @@ if (!urlExcel) {
         // Leer el precio de cada producto cargado. Detectamos los productos por
         // ProductoId (existe en todo documento) y leemos TotalIVA si existe
         // (facturas → con IVA) o, si no, Total (presupuestos → sin IVA por línea).
-        const preciosDespues = await page.evaluate(() => {
+        const preciosDespues = await page.evaluate((doc) => {
             const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
             const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
-            const IVA = 0.21; // presupuestos no guardan el IVA por línea: lo calculamos
+            const IVA = 0.21;
+            // Remito no maneja IVA: el Total ya es el precio final (factor 1).
+            const factor = doc === 'remito' ? 1 : (1 + IVA);
             const precioConIva = (prefijo, guid) => {
                 const tIva = document.querySelector(`input[name="${prefijo}[${guid}].TotalIVA"]`);
                 if (tIva) return aNumero(tIva.value);
                 const tot = document.querySelector(`input[name="${prefijo}[${guid}].Total"]`);
-                return tot ? Math.round(aNumero(tot.value) * (1 + IVA) * 100) / 100 : 0;
+                return tot ? Math.round(aNumero(tot.value) * factor * 100) / 100 : 0;
             };
             const resultados = [];
             document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
@@ -165,7 +167,7 @@ if (!urlExcel) {
                 if (precio > 0) resultados.push(precio);
             });
             return resultados;
-        });
+        }, caso.documento);
 
         console.log(`   Precios DESPUÉS: ${preciosDespues.join(', ')}`);
         console.log(`   Cantidad de precios: ${preciosDespues.length}`);

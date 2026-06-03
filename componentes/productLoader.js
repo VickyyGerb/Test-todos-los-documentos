@@ -56,17 +56,20 @@ class ProductLoader {
             return 0;
         }
 
-        const precio = await this.page.evaluate((info) => {
+        const precio = await this.page.evaluate(({ info, doc }) => {
             const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
-            const IVA = 0.21; // presupuestos no guardan el IVA por línea: lo calculamos
-            // Factura → TotalIVA (con IVA real). Presupuesto → Total neto × (1 + IVA).
+            const IVA = 0.21;
+            // Factura → TotalIVA (con IVA real). Presupuesto/Pedido → Total × (1 + IVA).
+            // Remito no maneja IVA: el Total ya es el precio final.
             const tIva = document.querySelector(`input[name="${info.prefijo}[${info.guid}].TotalIVA"]`);
             if (tIva) return aNumero(tIva.value);
             const tot = document.querySelector(`input[name="${info.prefijo}[${info.guid}].Total"]`);
-            return tot ? Math.round(aNumero(tot.value) * (1 + IVA) * 100) / 100 : 0;
-        }, info);
+            if (!tot) return 0;
+            const factor = doc === 'remito' ? 1 : (1 + IVA);
+            return Math.round(aNumero(tot.value) * factor * 100) / 100;
+        }, { info, doc: this.documento });
 
-        console.log(`   Precio del producto cargado (con IVA): ${precio}`);
+        console.log(`   Precio del producto cargado: ${precio}`);
         return precio;
     }
 
@@ -136,6 +139,11 @@ class ProductLoader {
     }
 
     async cargarPorCodigoBarra(codigoBarra) {
+        if (this.documento === 'remito') {
+            // Remito no tiene carga por código de barra: se omite.
+            console.log('   ⏭️ Remito no tiene carga por código de barra — se omite');
+            return 0;
+        }
         const antes = await this.snapshotGuids();
 
         await this.page.keyboard.press('F6');
@@ -147,8 +155,21 @@ class ProductLoader {
         return await this.leerPrecioNuevo(antes);
     }
 
+    // Cierra el select2 abierto y saca su máscara (#select2-drop-mask), que en
+    // remito intercepta el click del dropdown.
+    async cerrarSelect2Abierto() {
+        await this.page.keyboard.press('Escape');
+        await this.page.waitForTimeout(300);
+        await this.page.evaluate(() => {
+            document.querySelectorAll('#select2-drop-mask, .select2-drop-mask').forEach(m => m.remove());
+            if (window.jQuery) { try { jQuery('#select2-drop').hide(); } catch (e) {} }
+        });
+        await this.page.waitForTimeout(200);
+    }
+
     async cargarAsignacionMultiple(codigoInterno, cantidad = 1) {
         if (this.documento === 'pedido') return this.cargarAsignacionMultiplePedido(codigoInterno, cantidad);
+        if (this.documento === 'remito') return this.cargarAsignacionMultipleRemito(codigoInterno, cantidad);
         const antes = await this.snapshotGuids();
 
         await this.page.click('#btn-color-youtube.dropdown-toggle.btn.btn-sm');
@@ -177,6 +198,11 @@ class ProductLoader {
 
     async cargarDesdePlantilla(nombrePlantilla) {
         if (this.documento === 'pedido') return this.cargarDesdePlantillaPedido(nombrePlantilla);
+        if (this.documento === 'remito') {
+            // Remito no tiene carga por plantilla: se omite.
+            console.log('   ⏭️ Remito no tiene carga por plantilla — se omite');
+            return 0;
+        }
         const antes = await this.snapshotGuids();
 
         await this.page.click('#btn-color-youtube.dropdown-toggle.btn.btn-sm');
@@ -191,20 +217,10 @@ class ProductLoader {
         return await this.leerPrecioNuevo(antes);
     }
 
-    // ========================================================================
-    // SECCIÓN EXCLUSIVA DE PEDIDO
-    // En Pedido la carga MANUAL y por CÓDIGO DE BARRA son iguales que en el
-    // resto (mismo select2 .productoId); solo cambia el nombre de la tabla
-    // (ProductosLista), ya contemplado en la detección. Por eso esos dos NO
-    // pasan por acá. Asignación múltiple y plantilla usan otros botones en
-    // Pedido, así que quedan exclusivos (pendientes).
-    // ========================================================================
+   
     async cargarAsignacionMultiplePedido(codigoInterno, cantidad = 1) {
         const antes = await this.snapshotGuids();
 
-        // En Pedido el link "Asignación Múltiple" vive en un dropdown colapsado
-        // (Playwright lo ve "not visible"). Lo disparamos por JS: su onclick
-        // BuscarProducto(false) abre el modal igual.
         await this.page.evaluate(() => {
             const link = Array.from(document.querySelectorAll('a')).find(a => /Asignación Múltiple/i.test(a.textContent));
             if (link) link.click();
@@ -232,8 +248,6 @@ class ProductLoader {
     async cargarDesdePlantillaPedido(nombrePlantilla) {
         const antes = await this.snapshotGuids();
 
-        // En Pedido el link "Plantillas" (#btnAbrirModal) también está en el
-        // dropdown colapsado; lo disparamos por JS para abrir el modal.
         await this.page.evaluate(() => {
             const link = document.getElementById('btnAbrirModal');
             if (link) link.click();
@@ -246,6 +260,36 @@ class ProductLoader {
         await this.page.waitForTimeout(3000);
         await this.page.locator('.modal-footer:has-text("Asociar") a.btn-success').click();
         await this.page.waitForTimeout(3000);
+
+        return await this.leerPrecioNuevo(antes);
+    }
+
+    // EXCLUSIVA DE REMITO. Se pone el código en #NombreProducto y se clickea
+    // afuera (blur, dentro del modal) para que el producto cargue; después Agregar.
+    async cargarAsignacionMultipleRemito(codigoInterno, cantidad = 1) {
+        const antes = await this.snapshotGuids();
+
+        await this.cerrarSelect2Abierto();
+        await this.page.evaluate(() => {
+            const link = Array.from(document.querySelectorAll('a')).find(a => /Asignaci[oó]n M[uú]ltiple/i.test(a.textContent));
+            if (link) link.click();
+        });
+        await this.page.waitForTimeout(1500);
+
+        const modal = this.page.locator('#ModalBuscarMultiProducto');
+        await this.page.fill('#NombreProducto', codigoInterno);
+        await this.page.waitForTimeout(800);
+
+        await this.page.locator('#NombreProducto').blur();
+        await this.page.waitForTimeout(1500);
+
+        const fila = modal.locator('table tbody tr.odd');
+        await fila.waitFor({ state: 'visible', timeout: 5000 });
+        await fila.locator('input[type="checkbox"]').click();
+        await this.page.waitForTimeout(500);
+
+        await modal.getByRole('button', { name: 'Agregar' }).click();
+        await this.page.waitForTimeout(2500);
 
         return await this.leerPrecioNuevo(antes);
     }
