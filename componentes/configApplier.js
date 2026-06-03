@@ -97,21 +97,24 @@ class ConfigApplier {
         switch(nombre) {
             case 'descuento_global': {
                 try {
-                    console.log(`   Aplicando descuento global: ${valor}`);
-                    // El descuento global es a nivel documento (#Descuento = %),
-                    // no por producto. Logueamos los totales antes/después para
-                    // ver si se aplica y dónde se refleja.
+                    // Con "%" (ej. "%5" o "5%") => descuento porcentual (#Descuento).
+                    // Sin "%" (ej. "5") => descuento por monto fijo $ (#ValorDescuento).
+                    const esPorcentaje = String(valor).includes('%');
+                    const numero = String(valor).replace('%', '').trim();
+                    const campoId = esPorcentaje ? '#Descuento' : '#ValorDescuento';
+                    console.log(`   Aplicando descuento global: ${numero} ${esPorcentaje ? '(porcentaje)' : '(monto fijo $)'} -> ${campoId}`);
+
                     const leerTotales = () => this.page.evaluate(() => {
                         const g = (id) => { const e = document.getElementById(id); return e ? e.value : '(n/a)'; };
                         return `Descuento%=${g('Descuento')}  ValorDescuento=${g('ValorDescuento')}  Subtotal=${g('SubtotalNetoGravado')}  TotalTemp=${g('TotalTemp')}`;
                     });
                     console.log('   📊 ANTES:   ' + await leerTotales());
 
-                    const input = this.page.locator('#Descuento');
+                    const input = this.page.locator(campoId);
                     await input.scrollIntoViewIfNeeded();
                     await input.evaluate(el => el.removeAttribute('readonly'));
                     await input.click();
-                    await input.fill(String(valor));
+                    await input.fill(numero);
                     await this.page.keyboard.press('Tab');
                     await this.page.waitForTimeout(1500);
 
@@ -153,6 +156,10 @@ class ConfigApplier {
             }
                 
             case 'lista_precios':
+                if (this.documento === 'pedido') {
+                    console.log('   ⏭️ Pedido no usa lista de precios — se omite');
+                    break;
+                }
                 try {
                     const chosen = this.page.locator('#ListaDePreciosVentaId_chosen .chosen-single');
                     if (await chosen.count()) {
