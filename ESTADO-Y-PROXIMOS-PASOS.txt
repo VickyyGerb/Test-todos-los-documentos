@@ -21,7 +21,31 @@ CÓMO SE CORRE
 
 
 ========================================================================
-LO QUE SE HIZO HOY
+LO QUE SE HIZO HOY (2026-06-03)
+========================================================================
+- PEDIDO: verificados asignación múltiple y plantilla (4/4 métodos OK, 18150).
+- REMITO soportado (dentro de productLoader.js, ruteado por this.documento):
+    * Manual y Asignación Múltiple OK. Asign. múltiple usa su propio modal
+      (#ModalBuscarMultiProducto: poner código en #NombreProducto -> blur ->
+      tildar el check -> Agregar).
+    * Código de barra y Plantilla NO existen en remito -> se omiten a propósito.
+    * Remito NO maneja IVA: precio = Total tal cual (sin x1.21). Se ajustó en
+      las 3 lecturas de precio (carga, "después de configs" y configApplier).
+- CONFIGURACIONES (configApplier.js):
+    * descuento_item: re-aplica por pasadas hasta que los N ítems queden con el
+      valor (la tabla se re-dibujaba y perdía el descuento -> precios distintos).
+    * descuento_global: distingue por formato -> "5" = MONTO FIJO $ (#ValorDescuento),
+      "%5"/"5%" = PORCENTAJE (#Descuento). Antes todo iba a #Descuento (mal el $).
+    * lista_precios: id del widget cambia por documento; PEDIDO no tiene ese
+      módulo -> se omite (y ya no cuelga 30s si el widget no está).
+    * moneda / lista_precios / descuento_item ahora en try/catch (una config que
+      falla ya no mata el caso entero).
+- CORRIDA: login con reintento (si no aparece el campo Email) + cada caso corre
+  en su propio contexto (sesión limpia, no arrastra el login del caso anterior).
+
+
+========================================================================
+LO QUE SE HIZO (2026-06-02)
 ========================================================================
 - Lectura de precios CON IVA, agnóstica al documento:
     * Factura: lee el campo TotalIVA directo.
