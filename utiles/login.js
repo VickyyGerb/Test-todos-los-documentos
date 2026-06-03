@@ -14,17 +14,27 @@ async function loginComoAdmin(page, cuentaID) {
         throw new Error(`❌ CuentaID inválido: "${cuentaID}". Tiene que ser un número. Revisá la primera columna (CuentaID) de la planilla.`);
     }
 
-    await page.goto(urlBase);
-    await page.getByRole('textbox', { name: 'Email' }).fill(adminEmail);
-    await page.getByRole('textbox', { name: 'Contraseña' }).fill(adminPass);
+    for (let intento = 1; intento <= 2; intento++) {
+        try {
+            await page.goto(urlBase);
+            const email = page.getByRole('textbox', { name: 'Email' });
+            await email.waitFor({ state: 'visible', timeout: 15000 });
+            await email.fill(adminEmail);
+            await page.getByRole('textbox', { name: 'Contraseña' }).fill(adminPass);
 
-    await page.getByRole('button', { name: 'Ingresar' }).click();
-    await page.waitForNavigation();
-    await page.waitForLoadState('networkidle');
+            await page.getByRole('button', { name: 'Ingresar' }).click();
+            await page.waitForNavigation();
+            await page.waitForLoadState('networkidle');
 
-    await page.getByRole('textbox', { name: 'ID de cuenta' }).fill(cuenta);
-    await page.getByRole('button', { name: 'Ingresar' }).click();
+            await page.getByRole('textbox', { name: 'ID de cuenta' }).fill(cuenta);
+            await page.getByRole('button', { name: 'Ingresar' }).click();
 
-    await page.waitForNavigation(5000);
+            await page.waitForNavigation(5000);
+            return;
+        } catch (e) {
+            if (intento === 2) throw e;
+            console.log(`   ⚠️ Login intento ${intento} falló, reintento...`);
+        }
+    }
 }
 module.exports = { loginComoAdmin };

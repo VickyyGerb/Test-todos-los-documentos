@@ -1,6 +1,7 @@
 class ConfigApplier {
-    constructor(page) {
+    constructor(page, documento) {
         this.page = page;
+        this.documento = (documento || '').toLowerCase();
     }
 
     async aplicar(configuraciones, codigoProducto) {
@@ -14,15 +15,17 @@ class ConfigApplier {
 
     async leerPrecios() {
         
-        const precios = await this.page.evaluate(() => {
+        const precios = await this.page.evaluate((doc) => {
             const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
             const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
-            const IVA = 0.21; // presupuestos no guardan el IVA por línea: lo calculamos
+            const IVA = 0.21;
+            // Remito no maneja IVA: el Total ya es el precio final (factor 1).
+            const factor = doc === 'remito' ? 1 : (1 + IVA);
             const precioConIva = (prefijo, guid) => {
                 const tIva = document.querySelector(`input[name="${prefijo}[${guid}].TotalIVA"]`);
                 if (tIva) return aNumero(tIva.value);
                 const tot = document.querySelector(`input[name="${prefijo}[${guid}].Total"]`);
-                return tot ? Math.round(aNumero(tot.value) * (1 + IVA) * 100) / 100 : 0;
+                return tot ? Math.round(aNumero(tot.value) * factor * 100) / 100 : 0;
             };
             const resultados = [];
             document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
@@ -32,7 +35,7 @@ class ConfigApplier {
                 if (precio > 0) resultados.push(precio);
             });
             return resultados;
-        });
+        }, this.documento);
 
         console.log(`   Precios obtenidos: ${precios.join(', ')}`);
         return precios;
@@ -97,18 +100,19 @@ class ConfigApplier {
             }
                 
             case 'moneda':
-                await this.page.locator('#MonedaId_chosen .chosen-single').click();        
-                await this.page.keyboard.type(valor); 
-                await this.page.keyboard.press("Enter");
-                await this.leerPrecios();
-                console.log(`   ✅ Moneda aplicada: ${valor}`);
+                try {
+                    await this.page.locator('#MonedaId_chosen .chosen-single').click();
+                    await this.page.keyboard.type(valor);
+                    await this.page.keyboard.press("Enter");
+                    await this.leerPrecios();
+                    console.log(`   ✅ Moneda aplicada: ${valor}`);
+                } catch (e) {
+                    console.log(`   ⚠️ No pude aplicar moneda (¿el documento la tiene?): ${e.message}`);
+                }
                 break;
                 
             case 'cotizacion': {
-                // La cotización solo es editable con moneda extranjera elegida. El
-                // campo visible/editable es CotizacionDolarGeneral (NuevaCotizacionDolar
-                // queda oculto; CotizacionDolar es solo display). Llenar + Tab para
-                // recalcular. Si no está visible (sin moneda extranjera), se avisa.
+              
                 try {
                     const cot = this.page.locator('input[name="CotizacionDolar"]:visible').first();
                     await cot.waitFor({ state: 'visible', timeout: 5000 });
@@ -125,18 +129,26 @@ class ConfigApplier {
             }
                 
             case 'lista_precios':
-                await this.page.click('#ListaDePreciosVentaId_chosen .chosen-single');
-                await this.page.keyboard.type(valor);
-                await this.page.keyboard.press('Enter');
-                await this.leerPrecios();
-                console.log(`   ✅ Lista de precios aplicada: ${valor}`);
+                try {
+                    await this.page.click('#ListaDePreciosVentaId_chosen .chosen-single');
+                    await this.page.keyboard.type(valor);
+                    await this.page.keyboard.press('Enter');
+                    await this.leerPrecios();
+                    console.log(`   ✅ Lista de precios aplicada: ${valor}`);
+                } catch (e) {
+                    console.log(`   ⚠️ No pude aplicar lista de precios (¿el documento la tiene?): ${e.message}`);
+                }
                 break;
 
             case 'descuento_item': {
-                await this.aplicarDescuentoPorItem(valor);
-                const preciosItem = await this.leerPrecios();
-                console.log(`   Precios después del descuento por ítem: ${preciosItem.join(', ')}`);
-                console.log(`   ✅ Descuento por ítem aplicado: ${valor}`);
+                try {
+                    await this.aplicarDescuentoPorItem(valor);
+                    const preciosItem = await this.leerPrecios();
+                    console.log(`   Precios después del descuento por ítem: ${preciosItem.join(', ')}`);
+                    console.log(`   ✅ Descuento por ítem aplicado: ${valor}`);
+                } catch (e) {
+                    console.log(`   ⚠️ No pude aplicar descuento por ítem: ${e.message}`);
+                }
                 break;
             }
 

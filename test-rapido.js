@@ -43,8 +43,10 @@ if (!urlExcel) {
         console.log(`   Configuraciones: ${JSON.stringify(caso.configuraciones)}`);
         console.log('═'.repeat(72));
 
-        const page = await browser.newPage();
-        
+        // Contexto propio por caso: sesión limpia (sin arrastrar el login del anterior).
+        const context = await browser.newContext();
+        const page = await context.newPage();
+
         try {
             await loginComoAdmin(page, caso.cuentaID);
             console.log(`✅ Login exitoso en cuenta ${caso.cuentaID}`);
@@ -131,7 +133,7 @@ if (!urlExcel) {
             // ==================== 2. APLICAR CONFIGURACIONES ====================
             if (caso.configuraciones && Object.keys(caso.configuraciones).length > 0) {
                 console.log('\n⚙️ Aplicando configuraciones...');
-                const configApplier = new ConfigApplier(page);
+                const configApplier = new ConfigApplier(page, caso.documento);
                 await configApplier.aplicar(caso.configuraciones, caso.producto.codigoInterno);
                 console.log(`✅ Configuraciones aplicadas`);
                 await page.waitForTimeout(2000);
@@ -197,7 +199,7 @@ if (!urlExcel) {
             console.error(`❌ Error en caso: ${error.message}`);
         }
         
-        await page.close();
+        await context.close();
     }
     
     await browser.close();
