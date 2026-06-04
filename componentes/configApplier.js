@@ -8,9 +8,19 @@ class ConfigApplier {
         console.log('📋 Aplicando configuraciones:', configuraciones);
         console.log('📋 Código producto recibido en aplicar:', codigoProducto);
 
-        for (const [nombre, valor] of Object.entries(configuraciones)) {
-            await this.aplicarConfiguracion(nombre, valor, codigoProducto);
+        // Orden fijo de aplicación (NO el del Excel): la alícuota va casi al final
+        // porque otras configs la resetean; descuento_global cierra. Las que no
+        // estén acá se aplican después, en el orden en que vengan.
+        const orden = ['lista_precios', 'moneda', 'cotizacion', 'descuento_item', 'alicuota', 'descuento_global'];
+        const peso = (nombre) => { const i = orden.indexOf(nombre); return i === -1 ? orden.length : i; };
+        const entradas = Object.entries(configuraciones).sort((a, b) => peso(a[0]) - peso(b[0]));
+
+        const aplicadas = {};
+        for (const [nombre, valor] of entradas) {
+            const ok = await this.aplicarConfiguracion(nombre, valor, codigoProducto);
+            if (ok) aplicadas[nombre] = valor;
         }
+        return aplicadas;
     }
 
     async leerPrecios() {
@@ -157,7 +167,7 @@ class ConfigApplier {
         const { itemsCount, selects } = await this._descubrirSelectsAlicuota(objetivo);
         if (selects.length === 0) {
             console.log(`   ⚠️ No encontré ningún select de alícuota en las filas (ítems: ${itemsCount}).`);
-            return;
+            return false;
         }
 
         const names = selects.map(s => s.name);
@@ -185,11 +195,67 @@ class ConfigApplier {
         }
 
         await this.page.waitForTimeout(1000);
+        const fin = await this._leerAlicuotasActuales(names);
+        return fin.every(a => Math.abs(a.pct - objetivo) < 0.01);
+    }
+
+    async aplicarCotizacion(valor) {
+        const objetivo = parseFloat(String(valor).replace(/\./g, '').replace(',', '.'));
+        console.log(`   Aplicando cotización = ${valor} (objetivo ${objetivo})`);
+
+        const estado = await this.page.evaluate(() => {
+            return Array.from(document.querySelectorAll('input[name="CotizacionDolar"]')).map(el => ({
+                value: el.value, visible: !!el.offsetParent, readonly: el.readOnly, disabled: el.disabled,
+            }));
+        });
+        console.log(`   🔎 Campos CotizacionDolar: ${JSON.stringify(estado)}`);
+        if (estado.length === 0) {
+            console.log('   ⚠️ No hay campo de cotización (¿la moneda quedó en peso o no se aplicó?)');
+            return false;
+        }
+
+        const aNum = (t) => parseFloat(String(t || '').replace(/\./g, '').replace(',', '.'));
+
+        for (let pasada = 1; pasada <= 4; pasada++) {
+            const cot = this.page.locator('input[name="CotizacionDolar"]:visible').first();
+            try {
+                await cot.waitFor({ state: 'visible', timeout: 5000 });
+            } catch (e) {
+                console.log('   ⚠️ El campo de cotización no está visible');
+                return false;
+            }
+            await cot.evaluate(el => { el.removeAttribute('readonly'); el.removeAttribute('disabled'); });
+            await cot.click();
+            await cot.fill('');
+            await cot.type(String(valor));
+            await this.page.keyboard.press('Tab');
+            await this.page.evaluate((v) => {
+                const el = Array.from(document.querySelectorAll('input[name="CotizacionDolar"]')).find(e => e.offsetParent);
+                if (!el) return;
+                el.value = v;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                if (window.jQuery) { try { jQuery(el).trigger('input').trigger('change').blur(); } catch (e) {} }
+            }, String(valor));
+            await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            await this.page.waitForTimeout(1500);
+
+            const actual = await cot.inputValue().catch(() => '');
+            console.log(`   Pasada ${pasada}: cotización quedó en "${actual}"`);
+            if (Math.abs(aNum(actual) - objetivo) < 0.01) {
+                console.log(`   ✅ Cotización aplicada: ${valor}`);
+                await this.leerPrecios();
+                return true;
+            }
+            console.log('   ⚠️ La cotización no quedó / revirtió, reintento...');
+        }
+        return false;
     }
 
     async aplicarConfiguracion(nombre, valor, codigoProducto) {
         console.log(`⚙️ Aplicando configuración: ${nombre} = ${valor}`);
-        
+
+        let aplicada = false;
         switch(nombre) {
             case 'descuento_global': {
                 try {
@@ -216,12 +282,13 @@ class ConfigApplier {
 
                     console.log('   📊 DESPUÉS: ' + await leerTotales());
                     console.log(`   ✅ Descuento global aplicado: ${valor}`);
+                    aplicada = true;
                 } catch (e) {
                     console.log(`   ❌ Error: ${e.message}`);
                 }
                 break;
             }
-                
+
             case 'moneda':
                 try {
                     await this.page.locator('#MonedaId_chosen .chosen-single').click();
@@ -229,27 +296,19 @@ class ConfigApplier {
                     await this.page.keyboard.press("Enter");
                     await this.leerPrecios();
                     console.log(`   ✅ Moneda aplicada: ${valor}`);
+                    aplicada = true;
                 } catch (e) {
                     console.log(`   ⚠️ No pude aplicar moneda (¿el documento la tiene?): ${e.message}`);
                 }
                 break;
                 
-            case 'cotizacion': {
-              
+            case 'cotizacion':
                 try {
-                    const cot = this.page.locator('input[name="CotizacionDolar"]:visible').first();
-                    await cot.waitFor({ state: 'visible', timeout: 5000 });
-                    await cot.evaluate(el => el.removeAttribute('readonly'));
-                    await cot.fill(String(valor));
-                    await this.page.keyboard.press('Tab');
-                    await this.page.waitForTimeout(1500);
-                    await this.leerPrecios();
-                    console.log(`   ✅ Cotización aplicada: ${valor}`);
+                    aplicada = await this.aplicarCotizacion(valor);
                 } catch (e) {
-                    console.log(`   ⚠️ No pude aplicar cotización (¿el caso tiene moneda extranjera?): ${e.message}`);
+                    console.log(`   ⚠️ No pude aplicar cotización: ${e.message}`);
                 }
                 break;
-            }
                 
             case 'lista_precios':
                 if (this.documento === 'pedido') {
@@ -264,6 +323,7 @@ class ConfigApplier {
                         await this.page.keyboard.press('Enter');
                         await this.leerPrecios();
                         console.log(`   ✅ Lista de precios aplicada: ${valor}`);
+                        aplicada = true;
                     } else {
                         const cand = await this.page.evaluate(() => {
                             const out = [];
@@ -286,6 +346,7 @@ class ConfigApplier {
                     const preciosItem = await this.leerPrecios();
                     console.log(`   Precios después del descuento por ítem: ${preciosItem.join(', ')}`);
                     console.log(`   ✅ Descuento por ítem aplicado: ${valor}`);
+                    aplicada = true;
                 } catch (e) {
                     console.log(`   ⚠️ No pude aplicar descuento por ítem: ${e.message}`);
                 }
@@ -294,10 +355,12 @@ class ConfigApplier {
 
             case 'alicuota': {
                 try {
-                    await this.aplicarAlicuota(valor);
-                    const preciosAli = await this.leerPrecios();
-                    console.log(`   Precios después de la alícuota: ${preciosAli.join(', ')}`);
-                    console.log(`   ✅ Alícuota aplicada: ${valor}`);
+                    if (await this.aplicarAlicuota(valor)) {
+                        const preciosAli = await this.leerPrecios();
+                        console.log(`   Precios después de la alícuota: ${preciosAli.join(', ')}`);
+                        console.log(`   ✅ Alícuota aplicada: ${valor}`);
+                        aplicada = true;
+                    }
                 } catch (e) {
                     console.log(`   ⚠️ No pude aplicar alícuota: ${e.message}`);
                 }
@@ -308,6 +371,7 @@ class ConfigApplier {
                 console.log(`Configuración no implementada: ${nombre}`);
         }
         await this.page.waitForTimeout(500);
+        return aplicada;
     }
 }
 

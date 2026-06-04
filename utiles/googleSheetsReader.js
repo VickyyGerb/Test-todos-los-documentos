@@ -112,7 +112,11 @@ function convertirConfiguraciones(configString) {
     for (const par of pares) {
         const idx = par.indexOf(':');
         if (idx === -1) continue;
-        const clave = par.slice(0, idx).replace(/"/g, '').trim();
+        // La clave se normaliza (sin tildes, minúsculas) para que matchee el switch
+        // del configApplier aunque en el Excel venga "Cotización"/"cotización". El
+        // valor NO se toca (necesita su tilde, ej. "Dólar").
+        const clave = par.slice(0, idx).replace(/"/g, '').trim()
+            .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
         const valor = par.slice(idx + 1).replace(/"/g, '').trim();
         if (clave && valor) {
             configs[clave] = valor;
