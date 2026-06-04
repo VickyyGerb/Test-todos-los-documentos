@@ -4,6 +4,7 @@ const { loginComoAdmin } = require('./utiles/login');
 const { ProductLoader } = require('./componentes/productLoader');
 const { DocumentsPage } = require('./paginas/documents');
 const { ConfigApplier } = require('./componentes/configApplier');
+const { notificarDiscord } = require('./utiles/discordNotifier');
 require('dotenv').config();
 const fs = require('fs');
 const util = require('util');
@@ -30,7 +31,7 @@ if (!urlExcel) {
     const casos = await leerCasosDePrueba(urlExcel);
     console.log(`✅ Se encontraron ${casos.length} casos`);
 
-    const browser = await chromium.launch({ headless: false, slowMo: 80 });
+    const browser = await chromium.launch({ headless: false, slowMo: 80, args: ['--start-maximized'] });
 
     let numeroCaso = 0;
     for (const caso of casos) {
@@ -43,8 +44,18 @@ if (!urlExcel) {
         console.log(`   Configuraciones: ${JSON.stringify(caso.configuraciones)}`);
         console.log('═'.repeat(72));
 
+        const inicioCaso = Date.now();
+        let exito = false;
+        let tiposCarga = [];
+        let configsAplicadas = {};
+        let precioAntes = '-';
+        let precioDespues = '-';
+        const nombreMetodo = { manual: 'Manual', codigoBarra: 'Código de barra', asignMultiple: 'Asignación múltiple', plantilla: 'Plantilla' };
+        const fmtPrecios = (arr) => arr.length ? [...new Set(arr)].map(n => '$' + Number(n).toLocaleString('es-AR')).join(', ') : '-';
+
         // Contexto propio por caso: sesión limpia (sin arrastrar el login del anterior).
-        const context = await browser.newContext();
+        // viewport null = usa el tamaño real de la ventana (maximizada).
+        const context = await browser.newContext({ viewport: null });
         const page = await context.newPage();
 
         try {
@@ -129,12 +140,17 @@ if (!urlExcel) {
                 }
                 await page.waitForTimeout(500);
             }
-            
+
+            // Tipos de carga que REALMENTE cargaron en este documento (los que
+            // dieron precio). Los que no aplican/no andan no se incluyen.
+            tiposCarga = preciosAntes.map(p => nombreMetodo[p.metodo] || p.metodo);
+            precioAntes = fmtPrecios(preciosAntes.map(p => p.precio));
+
             // ==================== 2. APLICAR CONFIGURACIONES ====================
             if (caso.configuraciones && Object.keys(caso.configuraciones).length > 0) {
                 console.log('\n⚙️ Aplicando configuraciones...');
                 const configApplier = new ConfigApplier(page, caso.documento);
-                await configApplier.aplicar(caso.configuraciones, caso.producto.codigoInterno);
+                configsAplicadas = await configApplier.aplicar(caso.configuraciones, caso.producto.codigoInterno);
                 console.log(`✅ Configuraciones aplicadas`);
                 await page.waitForTimeout(2000);
             } else {
@@ -186,6 +202,8 @@ if (!urlExcel) {
             
             console.log('\n📊 VERIFICACIÓN DESPUÉS de configuraciones:');
             const preciosUnicosDespues = [...new Set(preciosDespues)];
+            exito = preciosDespues.length > 0 && preciosUnicosDespues.length === 1;
+            precioDespues = fmtPrecios(preciosDespues);
             if (preciosUnicosDespues.length === 1) {
                 console.log(`✅ DESPUÉS: Todos los productos tienen el mismo precio: ${preciosUnicosDespues[0]}`);
             } else {
@@ -198,10 +216,23 @@ if (!urlExcel) {
         } catch (error) {
             console.error(`❌ Error en caso: ${error.message}`);
         }
-        
+
         await context.close();
+
+        const duracionMs = Date.now() - inicioCaso;
+        await notificarDiscord({
+            exito,
+            duracionMs,
+            cuentaID: caso.cuentaID,
+            productoID: caso.producto.codigoInterno,
+            documento: caso.documento,
+            tiposCarga,
+            configs: configsAplicadas,
+            precioAntes,
+            precioDespues,
+        });
     }
-    
+
     await browser.close();
     console.log('\n🏁 Prueba finalizada');
 })();

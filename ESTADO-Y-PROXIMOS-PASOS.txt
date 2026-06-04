@@ -43,6 +43,24 @@ LO QUE SE HIZO HOY (2026-06-04)
   + timeout 60s + 1 reintento; el networkidle quedó en try/catch (15s) para que
   no tanque si la app hace polling. Esto resolvió los timeouts de /Venta/Crear
   cuando el dev está lento.
+- NOTIFICACIÓN A DISCORD (utiles/discordNotifier.js): una por cada caso (test)
+  vía webhook. Muestra: resultado (✅/❌), tiempo del test (ej. "2h"), cuenta,
+  producto, documento, tipos de carga, configuraciones y precio antes/después.
+    * Tipos de carga = SOLO los que realmente cargaron (los que no aplican/no
+      andan en ese doc no salen). Configuraciones = SOLO las que se aplicaron
+      (configApplier.aplicar() ahora devuelve las aplicadas).
+    * La URL va en .env como DISCORD_WEBHOOK_URL (gitignored). Si no está, avisa
+      y sigue sin romper. Quedó .env.example con la clave de ejemplo.
+- ORDEN FIJO DE CONFIGS (configApplier.aplicar): se ignora el orden del Excel y
+  se aplican en: lista_precios -> moneda -> cotizacion -> descuento_item ->
+  alicuota -> descuento_global (las desconocidas al final). La alícuota va casi
+  al final porque otras configs la resetean.
+- COTIZACIÓN arreglada: el bug era la TILDE — en el Excel venía "cotización" y el
+  switch buscaba "cotizacion" -> nunca se aplicaba (quedaba el dólar default). Se
+  normalizan las CLAVES al leer el Sheet (sin tildes + minúsculas); los valores
+  NO se tocan (ej. "Dólar"). Además aplicarCotizacion ahora es robusto: diagnostica
+  los campos CotizacionDolar, setea por fill+type+JS/eventos y re-aplica en pasadas.
+- VENTANA MAXIMIZADA: launch con --start-maximized + newContext({viewport:null}).
 
 
 ========================================================================
@@ -160,6 +178,13 @@ CON QUÉ SEGUIR (para cubrir todo)
 
 2b.[HECHO ✓] Alícuota (IVA por ítem) en factura: campo TipoIVAId, vía jQuery con
    re-aplicación hasta que aguanta el recálculo del servidor (2026-06-04).
+
+2c.[HECHO ✓] Cotización: arreglada (era la tilde "cotización" vs "cotizacion").
+   Claves del Excel normalizadas + aplicarCotizacion robusto. Da el mismo precio
+   que a mano (2026-06-04).
+
+2d.[HECHO ✓] Notificación a Discord por caso + orden fijo de configs + ventana
+   maximizada (2026-06-04).
 
 3. [PENDIENTE] Configuraciones que faltan:
    - alícuota en venta_unificada (verificar si tiene TipoIVAId por línea)
