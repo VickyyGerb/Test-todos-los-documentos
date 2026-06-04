@@ -12,14 +12,20 @@ function formatearDuracion(ms) {
     return partes.join(' ');
 }
 
-async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, documento, tiposCarga, configs, precioAntes, precioDespues }) {
+async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, documento, tiposCarga, metodosEsperados, configs, precioAntes, precioDespues }) {
     const url = process.env.DISCORD_WEBHOOK_URL;
     if (!url) {
         console.log('⚠️ No hay DISCORD_WEBHOOK_URL en .env — no se envía notificación a Discord');
         return;
     }
 
-    const estado = exito ? '✅ EXITOSO' : '❌ FALLÓ';
+    const cargados = (tiposCarga && tiposCarga.length) || 0;
+    let estado = exito ? '✅ EXITOSO' : '❌ FALLÓ';
+    // Si pasó pero faltó correr algún método (omitido por flakiness/no aplica),
+    // se aclara cuántos de los esperados corrieron, para no "mentir".
+    if (exito && metodosEsperados && cargados < metodosEsperados) {
+        estado = `✅ EXITOSO (${cargados} de ${metodosEsperados} métodos)`;
+    }
     const configsTexto = (configs && Object.keys(configs).length)
         ? Object.entries(configs).map(([k, v]) => `${k}: ${v}`).join('\n')
         : '-';

@@ -252,6 +252,63 @@ class ConfigApplier {
         return false;
     }
 
+    async aplicarMoneda(valor) {
+        const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+        const objetivo = norm(valor);
+
+        const leerMoneda = () => this.page.evaluate(() => {
+            const s = document.getElementById('MonedaId');
+            if (!s) return null;
+            const o = s.options[s.selectedIndex];
+            return o ? o.textContent.trim() : null;
+        });
+
+        const inicial = await leerMoneda();
+        if (inicial === null) {
+            console.log('   ⚠️ No hay combo de moneda (#MonedaId) en este documento — se omite');
+            return false;
+        }
+        console.log(`   Moneda actual: "${inicial}"  ->  objetivo "${valor}"`);
+
+        const coincide = (txt) => !!txt && norm(txt).includes(objetivo);
+
+        for (let intento = 1; intento <= 3; intento++) {
+            if (intento === 1) {
+                try {
+                    await this.page.locator('#MonedaId_chosen .chosen-single').click();
+                    await this.page.waitForTimeout(300);
+                    await this.page.keyboard.type(valor);
+                    await this.page.waitForTimeout(400);
+                    await this.page.keyboard.press('Enter');
+                } catch (e) { /* si la UI falla, los próximos intentos van por jQuery */ }
+            } else {
+                await this.page.evaluate((obj) => {
+                    const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+                    const s = document.getElementById('MonedaId');
+                    if (!s) return;
+                    const opt = Array.from(s.options).find(o => norm(o.textContent).includes(obj));
+                    if (!opt) return;
+                    s.value = opt.value;
+                    if (window.jQuery) { try { jQuery(s).val(opt.value).trigger('chosen:updated').trigger('change'); } catch (e) {} }
+                    else s.dispatchEvent(new Event('change', { bubbles: true }));
+                }, objetivo);
+            }
+            await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            await this.page.waitForTimeout(1000);
+
+            const actual = await leerMoneda();
+            console.log(`   Intento ${intento}: moneda quedó en "${actual}"`);
+            if (coincide(actual)) {
+                await this.leerPrecios();
+                console.log(`   ✅ Moneda aplicada: ${valor}`);
+                return true;
+            }
+        }
+
+        console.log(`   ⚠️ No pude confirmar el cambio de moneda a "${valor}"`);
+        return false;
+    }
+
     async aplicarConfiguracion(nombre, valor, codigoProducto) {
         console.log(`⚙️ Aplicando configuración: ${nombre} = ${valor}`);
 
@@ -295,14 +352,9 @@ class ConfigApplier {
                     break;
                 }
                 try {
-                    await this.page.locator('#MonedaId_chosen .chosen-single').click();
-                    await this.page.keyboard.type(valor);
-                    await this.page.keyboard.press("Enter");
-                    await this.leerPrecios();
-                    console.log(`   ✅ Moneda aplicada: ${valor}`);
-                    aplicada = true;
+                    aplicada = await this.aplicarMoneda(valor);
                 } catch (e) {
-                    console.log(`   ⚠️ No pude aplicar moneda (¿el documento la tiene?): ${e.message}`);
+                    console.log(`   ⚠️ No pude aplicar moneda: ${e.message}`);
                 }
                 break;
 

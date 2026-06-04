@@ -197,8 +197,14 @@ CON QUÉ SEGUIR (para cubrir todo)
    - reglas de descuento
    (Se dejaron para cuando se confirme cómo funcionan en el sistema.)
 
-4. [MEJORA] Carga manual: dejarla 100% (hoy anda con reintento + resiliencia).
-   Es la única con flakiness (re-render del select2).
+4. [MEJORADO ✓] Robustez (2026-06-04):
+   - Carga manual: ya no duplica el producto si carga tarde (>8s). Antes de
+     reintentar verifica si el intento anterior cargó y, si sí, no agrega otro.
+   - Notificación honesta: si el test pasa pero faltó algún método, lo aclara
+     ("✅ EXITOSO (3 de 4 métodos)").
+   - moneda: ahora VERIFICA que el combo #MonedaId quedó en la moneda pedida
+     (match sin tildes/mayúsculas) con fallback jQuery + reintentos, igual que
+     cotización. Antes daba "aplicada" sin confirmar.
 
 5. [VALORES] Revisar casos límite ya armados (descuento 0/100/decimal/negativo)
    y los negativos (CuentaID inválido, producto inexistente, sin métodos, etc.).

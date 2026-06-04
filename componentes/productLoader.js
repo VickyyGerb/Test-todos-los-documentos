@@ -106,6 +106,17 @@ class ProductLoader {
         // Reintenta una vez si el producto no queda (el re-render del select2 a
         // veces hace que la selección no se confirme).
         for (let intento = 1; intento <= 2; intento++) {
+            // Antes de reintentar, chequear si el intento anterior cargó tarde
+            // (>8s): si ya hay un producto nuevo, usarlo y NO agregar otro
+            // (si no, se cargaba duplicado).
+            if (intento > 1) {
+                const tardio = await this.leerPrecioNuevo(antes, 2500);
+                if (tardio > 0) {
+                    console.log('   ℹ️ Manual: el producto del intento anterior cargó tarde, no reintento');
+                    return tardio;
+                }
+            }
+
             await this.abrirSelectProductoVacio();
 
             // Escribir en el buscador del dropdown activo de select2 (#select2-drop).

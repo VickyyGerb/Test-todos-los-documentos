@@ -53,6 +53,14 @@ if (!urlExcel) {
         const nombreMetodo = { manual: 'Manual', codigoBarra: 'Código de barra', asignMultiple: 'Asignación múltiple', plantilla: 'Plantilla' };
         const fmtPrecios = (arr) => arr.length ? [...new Set(arr)].map(n => '$' + Number(n).toLocaleString('es-AR')).join(', ') : '-';
 
+        // Métodos que se ESPERABA correr (los marcados con SI y con el dato necesario).
+        const metodosEsperados = [
+            m.manual && caso.producto.codigoInterno,
+            m.codigoBarra && caso.producto.codigoBarra,
+            m.asignMultiple && caso.producto.codigoInterno,
+            m.plantilla && caso.plantillaNombre,
+        ].filter(Boolean).length;
+
         // Contexto propio por caso: sesión limpia (sin arrastrar el login del anterior).
         // viewport null = usa el tamaño real de la ventana (maximizada).
         const context = await browser.newContext({ viewport: null });
@@ -227,6 +235,7 @@ if (!urlExcel) {
             productoID: caso.producto.codigoInterno,
             documento: caso.documento,
             tiposCarga,
+            metodosEsperados,
             configs: configsAplicadas,
             precioAntes,
             precioDespues,
