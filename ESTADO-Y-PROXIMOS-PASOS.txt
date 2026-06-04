@@ -143,6 +143,39 @@ cubre, así que no bloquea.
 
 
 ========================================================================
+PARA MAÑANA (2026-06-05)  <<< EMPEZAR ACÁ
+========================================================================
+1. VERIFICAR los 3 fixes de robustez que se commitearon hoy pero NO se corrieron
+   todavía (commit 6c5c438). Correr una fila y mirar resultado-corrida.log:
+   - moneda + cotización: poner "moneda: Dólar, cotizacion: 2000" en una factura.
+     Esperar en el log "Intento 1: moneda quedó en Dólar..." -> "✅ Moneda aplicada"
+     y que el precio final dé igual que a mano (dio 8,86 con esos valores).
+   - carga manual: confirmar que NO carga el producto dos veces cuando el 1er
+     intento tarda (mirar que la cantidad de ítems sea la correcta).
+   - notificación Discord: si falta un método, debe decir "EXITOSO (3 de 4 métodos)".
+
+2. CONFIGS QUE FALTAN (rango de precios y reglas de descuento): NO se pueden hacer
+   a ciegas, dependen de cómo esté configurada la cuenta en Fidel. ANTES de tocar
+   código, AVERIGUAR con quien sepa:
+   - rango de precios: parece ser precio por CANTIDAD (si la cuenta lo tiene
+     activado). Habría que sumar una columna "Cantidad" al Sheet y usarla al
+     cargar (los métodos cargar* ya reciben un parámetro cantidad, hoy fijo en 1).
+   - reglas de descuento: descuentos por cuenta / marca / categoría, etc.
+   (Si no hay con quién confirmar, saltear esto y hacer el punto 3 o 4.)
+
+3. ALTERNATIVA SIN DEPENDER DE NADIE (para avanzar igual): sumar la columna
+   "Cantidad" al Sheet y pasarla a las cargas. Es concreto y deja listo el
+   terreno para "rango de precios por cantidad". Archivos: googleSheetsReader.js
+   (leer la columna) + test-rapido.js (pasarla) + productLoader.js (usarla).
+
+4. CASOS LÍMITE / NEGATIVOS: revisar el set de 35 casos (descuento 0/100/decimal/
+   negativo, CuentaID inválido, producto inexistente, sin métodos, etc.).
+
+5. ⚠️ SEGURIDAD (sigue pendiente): cambiar la contraseña de admin en Fidel
+   (estuvo pública en GitHub).
+
+
+========================================================================
 DÓNDE QUEDAMOS  <<< RETOMAR ACÁ
 ========================================================================
 Pedido quedó COMPLETO y VERIFICADO (4/4 métodos). La fila 1268 se corrió el
