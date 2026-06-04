@@ -290,6 +290,10 @@ class ConfigApplier {
             }
 
             case 'moneda':
+                if (this.documento === 'venta_unificada') {
+                    console.log('   ⏭️ Venta unificada no tiene moneda — se omite');
+                    break;
+                }
                 try {
                     await this.page.locator('#MonedaId_chosen .chosen-single').click();
                     await this.page.keyboard.type(valor);
@@ -301,8 +305,12 @@ class ConfigApplier {
                     console.log(`   ⚠️ No pude aplicar moneda (¿el documento la tiene?): ${e.message}`);
                 }
                 break;
-                
+
             case 'cotizacion':
+                if (this.documento === 'venta_unificada') {
+                    console.log('   ⏭️ Venta unificada no tiene cotización — se omite');
+                    break;
+                }
                 try {
                     aplicada = await this.aplicarCotizacion(valor);
                 } catch (e) {
