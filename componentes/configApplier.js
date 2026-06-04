@@ -72,8 +72,6 @@ class ConfigApplier {
             return parseFloat(((await input.inputValue()) || '').replace(',', '.')) || 0;
         };
 
-        // El recálculo re-dibuja la tabla y a veces "pierde" el descuento en filas
-        // ya editadas. Pasamos varias veces re-aplicando sólo las que no quedaron.
         for (let pasada = 1; pasada <= 4; pasada++) {
             const faltan = [];
             for (const it of items) {
@@ -89,6 +87,104 @@ class ConfigApplier {
         }
 
         await this.page.waitForTimeout(1000); // que se asiente el recálculo final
+    }
+
+    async _descubrirSelectsAlicuota(objetivo) {
+        return await this.page.evaluate((objetivo) => {
+            const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
+            const aNum = (t) => {
+                const m = String(t || '').replace(',', '.').match(/-?\d+(\.\d+)?/);
+                return m ? parseFloat(m[0]) : NaN;
+            };
+
+            const items = [];
+            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
+                const m = inp.name.match(reId);
+                if (m && inp.value && inp.value.trim() !== '') items.push({ prefijo: m[1], guid: m[2] });
+            });
+
+            const selects = [];
+            items.forEach(it => {
+                const base = `${it.prefijo}[${it.guid}].`;
+                const sel = Array.from(document.querySelectorAll('select[name]'))
+                    .find(el => el.name.startsWith(base) && /alicuota|aliquota|iva/i.test(el.name));
+                if (sel) selects.push({ name: sel.name, opciones: Array.from(sel.options).map(o => o.textContent.trim()) });
+            });
+
+            return { itemsCount: items.length, selects };
+        }, objetivo);
+    }
+
+    async _leerAlicuotasActuales(names) {
+        return await this.page.evaluate((names) => {
+            const aNum = (t) => {
+                const m = String(t || '').replace(',', '.').match(/-?\d+(\.\d+)?/);
+                return m ? parseFloat(m[0]) : NaN;
+            };
+            return names.map(n => {
+                const s = document.querySelector(`select[name="${n}"]`);
+                const o = s ? s.options[s.selectedIndex] : null;
+                return { name: n, pct: o ? aNum(o.textContent) : NaN };
+            });
+        }, names);
+    }
+
+    async _setAlicuota(name, objetivo) {
+        return await this.page.evaluate(({ name, objetivo }) => {
+            const aNum = (t) => { const m = String(t || '').replace(',', '.').match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : NaN; };
+            const s = document.querySelector(`select[name="${name}"]`);
+            if (!s) return false;
+            const opt = Array.from(s.options).find(o => Math.abs(aNum(o.textContent) - objetivo) < 0.01);
+            if (!opt) return false;
+            s.value = opt.value;
+            if (window.jQuery) {
+                try { jQuery(s).val(opt.value).trigger('chosen:updated').trigger('change'); } catch (e) {}
+            } else {
+                s.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            return true;
+        }, { name, objetivo });
+    }
+
+    async aplicarAlicuota(valor) {
+        const objetivo = parseFloat(String(valor).replace('%', '').replace(',', '.')) || 0;
+        console.log(`   Aplicando alícuota de IVA = ${objetivo}% a los ítems cargados...`);
+
+        if (this.documento !== 'factura' && this.documento !== 'remito') {
+            console.log(`   ⚠️ ${this.documento} lee el precio como Total×1,21 (IVA fijo 21%); si la alícuota no es 21% puede no reflejarse.`);
+        }
+
+        const { itemsCount, selects } = await this._descubrirSelectsAlicuota(objetivo);
+        if (selects.length === 0) {
+            console.log(`   ⚠️ No encontré ningún select de alícuota en las filas (ítems: ${itemsCount}).`);
+            return;
+        }
+
+        const names = selects.map(s => s.name);
+        console.log(`   Ítems: ${itemsCount}  |  opciones: ${selects[0].opciones.join(' / ')}`);
+
+        for (let pasada = 1; pasada <= 6; pasada++) {
+            const actuales = await this._leerAlicuotasActuales(names);
+            const faltan = names.filter((n, i) => Math.abs(actuales[i].pct - objetivo) >= 0.01);
+            if (faltan.length === 0) {
+                console.log(`   Pasada ${pasada}: ${names.length} ítem(s) en ${objetivo}%, esperando recálculo...`);
+                await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+                await this.page.waitForTimeout(2500);
+                const reCheck = await this._leerAlicuotasActuales(names);
+                if (reCheck.every(a => Math.abs(a.pct - objetivo) < 0.01)) {
+                    console.log(`   ✅ Los ${names.length} ítem(s) quedaron con alícuota = ${objetivo}%`);
+                    break;
+                }
+                console.log(`   ⚠️ El servidor revirtió la alícuota, re-aplicando...`);
+                continue;
+            }
+            console.log(`   Pasada ${pasada}: ${faltan.length} ítem(s) sin la alícuota, re-aplicando...`);
+            for (const n of faltan) await this._setAlicuota(n, objetivo);
+            await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            await this.page.waitForTimeout(800);
+        }
+
+        await this.page.waitForTimeout(1000);
     }
 
     async aplicarConfiguracion(nombre, valor, codigoProducto) {
@@ -192,6 +288,18 @@ class ConfigApplier {
                     console.log(`   ✅ Descuento por ítem aplicado: ${valor}`);
                 } catch (e) {
                     console.log(`   ⚠️ No pude aplicar descuento por ítem: ${e.message}`);
+                }
+                break;
+            }
+
+            case 'alicuota': {
+                try {
+                    await this.aplicarAlicuota(valor);
+                    const preciosAli = await this.leerPrecios();
+                    console.log(`   Precios después de la alícuota: ${preciosAli.join(', ')}`);
+                    console.log(`   ✅ Alícuota aplicada: ${valor}`);
+                } catch (e) {
+                    console.log(`   ⚠️ No pude aplicar alícuota: ${e.message}`);
                 }
                 break;
             }

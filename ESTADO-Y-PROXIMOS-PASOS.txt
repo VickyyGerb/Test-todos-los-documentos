@@ -1,6 +1,6 @@
 ========================================================================
 ESTADO DEL PROYECTO — Test de carga de productos (Playwright)
-Última actualización: 2026-06-03
+Última actualización: 2026-06-04
 ========================================================================
 
 QUÉ HACE EL PROYECTO
@@ -21,7 +21,32 @@ CÓMO SE CORRE
 
 
 ========================================================================
-LO QUE SE HIZO HOY (2026-06-03)
+LO QUE SE HIZO HOY (2026-06-04)
+========================================================================
+- CONFIGURACIÓN ALÍCUOTA (IVA por ítem) — implementada y andando en FACTURA:
+    * Campo real en el DOM: ListaProductoVenta[guid].TipoIVAId (un <select> con
+      widget chosen). Opciones: 0% / 2,5% / 5% / 10,5% / 21% / 27% / Exento / No Grav.
+    * En el Sheet se usa en Configuraciones: "alicuota: 27" (o "10,5", etc.).
+    * Se setea por JS/jQuery (val -> chosen:updated -> change): el click del
+      widget chosen en la grilla es flaky (abre el dropdown equivocado o no es
+      clickeable), pero setear por jQuery pega siempre y recalcula el TotalIVA.
+    * Cambiar la alícuota dispara un recálculo del servidor (AJAX) que vuelve unos
+      segundos después y puede revertir la línea. Por eso el loop: aplica ->
+      espera networkidle + 2,5s -> RE-verifica -> re-aplica si revirtió (hasta 6
+      pasadas), hasta que la alícuota aguanta el roundtrip.
+    * El precio se lee de TotalIVA, así que al cambiar a 27% el precio sube solo
+      (ej. 15000 neto -> 19050 con IVA, vs 18150 con 21%). En presupuesto/pedido
+      se avisa que ahí el precio se asume Total×1,21 (IVA fijo) y una alícuota
+      distinta de 21% puede no reflejarse.
+- VENTA_UNIFICADA: probado y andando (era el último documento sin verificar).
+- NAVEGACIÓN robusta (paginas/documents.js): goto con waitUntil 'domcontentloaded'
+  + timeout 60s + 1 reintento; el networkidle quedó en try/catch (15s) para que
+  no tanque si la app hace polling. Esto resolvió los timeouts de /Venta/Crear
+  cuando el dev está lento.
+
+
+========================================================================
+LO QUE SE HIZO (2026-06-03)
 ========================================================================
 - PEDIDO: verificados asignación múltiple y plantilla (4/4 métodos OK, 18150).
 - REMITO soportado (dentro de productLoader.js, ruteado por this.documento):
@@ -80,10 +105,10 @@ LO QUE SE HIZO (2026-06-02)
 ESTADO ACTUAL POR DOCUMENTO / MÉTODO
 ========================================================================
                        Manual  CodBarra  AsignMult  Plantilla   Configs
-  factura                OK      OK        OK         OK          5/5 OK
+  factura                OK      OK        OK         OK          6/6 OK (+ alícuota)
   presupuesto            OK      OK        OK         OK          OK (sin moneda)
   pedido                 OK      OK        OK         OK          OK (sin moneda)
-  venta_unificada        ?       ?         ?          ?           ?
+  venta_unificada        OK      OK        OK         OK          OK
   remito                 OK      N/A       OK         N/A         (sin config)
 
   (OK = probado y andando; ? = sin probar; N/A = el documento no tiene ese método)
@@ -111,12 +136,16 @@ del dropdown ("Asignación Múltiple" y #btnAbrirModal/Plantillas) resolvió el
 Remito quedó CERRADO (2026-06-03): Manual y Asignación Múltiple dan 15000 (sin
 IVA). Código de barra y plantilla no existen en remito → se omiten.
 
->>> PRÓXIMO PASO: probar venta_unificada (el último documento sin probar).
-    Armar una fila en el Sheet (mismo producto 00011 / barra 111111) y correrla.
-    Mirar resultado-corrida.log; si algún método falla, lo más probable es que la
-    tabla de productos o algún botón/modal tenga otro nombre (como pasó con Pedido
-    = ProductosLista y Remito = ModalBuscarMultiProducto). Técnica de siempre:
-    diagnóstico volcando el DOM a un debug-*.txt para ver los selectores reales.
+Venta_unificada quedó PROBADO (2026-06-04): los 4 métodos andan. Era el último
+documento sin verificar → ya están TODOS los documentos cubiertos.
+
+Alícuota (IVA por ítem) quedó IMPLEMENTADA en factura (2026-06-04): campo
+TipoIVAId, se setea por jQuery y se re-aplica hasta que aguanta el recálculo del
+servidor. "alicuota: 27" sube el precio a 19050 (vs 18150 con 21%).
+
+>>> PRÓXIMO PASO: ver alícuota en venta_unificada (chequear si tiene el campo
+    TipoIVAId por línea como factura, y si el precio lo refleja). Y avanzar con
+    las configuraciones pendientes (rango de precios, reglas de descuento).
 
 
 ========================================================================
@@ -127,12 +156,13 @@ CON QUÉ SEGUIR (para cubrir todo)
 1b.[HECHO ✓] Remito: Manual + Asignación Múltiple OK (15000, sin IVA). Barra y
    plantilla no existen en remito → omitidos.
 
-2. [EN CURSO] Probar venta_unificada (último documento sin probar).
-   Puede necesitar ajustes como Pedido/Remito (tabla/botones con otro nombre).
-   Usar el mismo método: correr una fila, mirar resultado-corrida.log, y si hace
-   falta, un diagnóstico (volcar el DOM a un debug-*.txt) para ver los nombres.
+2. [HECHO ✓] Venta_unificada: los 4 métodos probados y andando (2026-06-04).
+
+2b.[HECHO ✓] Alícuota (IVA por ítem) en factura: campo TipoIVAId, vía jQuery con
+   re-aplicación hasta que aguanta el recálculo del servidor (2026-06-04).
 
 3. [PENDIENTE] Configuraciones que faltan:
+   - alícuota en venta_unificada (verificar si tiene TipoIVAId por línea)
    - rango de precios
    - reglas de descuento
    (Se dejaron para cuando se confirme cómo funcionan en el sistema.)
