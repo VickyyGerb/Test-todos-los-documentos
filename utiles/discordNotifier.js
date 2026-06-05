@@ -12,7 +12,7 @@ function formatearDuracion(ms) {
     return partes.join(' ');
 }
 
-async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, documento, tiposCarga, metodosEsperados, configs, precioAntes, precioDespues }) {
+async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, documento, tiposCarga, metodosEsperados, configs, precioUnitario, precioAntes, precioDespues }) {
     const url = process.env.DISCORD_WEBHOOK_URL;
     if (!url) {
         console.log('⚠️ No hay DISCORD_WEBHOOK_URL en .env — no se envía notificación a Discord');
@@ -21,8 +21,7 @@ async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, docum
 
     const cargados = (tiposCarga && tiposCarga.length) || 0;
     let estado = exito ? '✅ EXITOSO' : '❌ FALLÓ';
-    // Si pasó pero faltó correr algún método (omitido por flakiness/no aplica),
-    // se aclara cuántos de los esperados corrieron, para no "mentir".
+
     if (exito && metodosEsperados && cargados < metodosEsperados) {
         estado = `✅ EXITOSO (${cargados} de ${metodosEsperados} métodos)`;
     }
@@ -30,20 +29,35 @@ async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, docum
         ? Object.entries(configs).map(([k, v]) => `${k}: ${v}`).join('\n')
         : '-';
 
+    const fields = [
+        { name: 'Resultado', value: estado, inline: true },
+        { name: 'Tiempo de test', value: formatearDuracion(duracionMs), inline: true },
+        { name: 'Cuenta', value: String(cuentaID || '-'), inline: true },
+        { name: 'Producto', value: String(productoID || '-'), inline: true },
+        { name: 'Documento', value: String(documento || '-'), inline: true },
+        { name: 'Tipos de carga', value: (tiposCarga && tiposCarga.length) ? tiposCarga.join(', ') : '-', inline: false },
+        { name: 'Configuraciones', value: configsTexto, inline: false },
+    ];
+
+    const hayConfigs = configs && Object.keys(configs).length > 0;
+    if (!hayConfigs) {
+        // Sin configuraciones el precio no cambia: un solo campo "Precio".
+        fields.push({ name: 'Precio', value: String(precioDespues || precioAntes || '-'), inline: false });
+    } else {
+        // "Precio antes" en su propia línea; abajo, "precio x producto" (solo si hay
+        // rango de precios) y "precio después" juntos en la misma línea (inline).
+        fields.push({ name: 'Precio antes de configs', value: String(precioAntes || '-'), inline: false });
+        const hayUnitario = precioUnitario && precioUnitario !== '-';
+        if (hayUnitario) {
+            fields.push({ name: 'Precio x producto (unit.)', value: String(precioUnitario), inline: true });
+        }
+        fields.push({ name: 'Precio después de configs', value: String(precioDespues || '-'), inline: true });
+    }
+
     const embed = {
         title: `Test ${estado}`,
         color: exito ? 0x2ecc71 : 0xe74c3c,
-        fields: [
-            { name: 'Resultado', value: estado, inline: true },
-            { name: 'Tiempo de test', value: formatearDuracion(duracionMs), inline: true },
-            { name: 'Cuenta', value: String(cuentaID || '-'), inline: true },
-            { name: 'Producto', value: String(productoID || '-'), inline: true },
-            { name: 'Documento', value: String(documento || '-'), inline: true },
-            { name: 'Tipos de carga', value: (tiposCarga && tiposCarga.length) ? tiposCarga.join(', ') : '-', inline: false },
-            { name: 'Configuraciones', value: configsTexto, inline: false },
-            { name: 'Precio antes de configs', value: String(precioAntes || '-'), inline: true },
-            { name: 'Precio después de configs', value: String(precioDespues || '-'), inline: true },
-        ],
+        fields,
     };
 
     try {

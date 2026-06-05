@@ -50,6 +50,7 @@ if (!urlExcel) {
         let configsAplicadas = {};
         let precioAntes = '-';
         let precioDespues = '-';
+        let precioUnitario = '-';
         const nombreMetodo = { manual: 'Manual', codigoBarra: 'Código de barra', asignMultiple: 'Asignación múltiple', plantilla: 'Plantilla' };
         const fmtPrecios = (arr) => arr.length ? [...new Set(arr)].map(n => '$' + Number(n).toLocaleString('es-AR')).join(', ') : '-';
 
@@ -197,7 +198,68 @@ if (!urlExcel) {
 
         console.log(`   Precios DESPUÉS: ${preciosDespues.join(', ')}`);
         console.log(`   Cantidad de precios: ${preciosDespues.length}`);
-            
+
+        // Detalle por línea para comparar los 4 campos de la grilla entre cargas:
+        // Precio (unitario) / Cantidad / Bonificación / Total con IVA. Como las
+        // líneas son el mismo producto con la misma cantidad, deben coincidir.
+        const lineasDetalle = await page.evaluate((doc) => {
+            const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
+            const aNum = (t) => parseFloat((t || '').replace(/\./g, '').replace(',', '.')) || 0;
+            const val = (prefijo, guid, campo) => {
+                const el = document.querySelector(`[name="${prefijo}[${guid}].${campo}"]`);
+                return el ? el.value : null;
+            };
+            const out = [];
+            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
+                const m = inp.name.match(reId);
+                if (!m || !inp.value || inp.value.trim() === '') return;
+                const prefijo = m[1], guid = m[2];
+                const tIva = val(prefijo, guid, 'TotalIVA');
+                out.push({
+                    precio: aNum(val(prefijo, guid, 'Precio')),
+                    cantidad: aNum(val(prefijo, guid, 'Cantidad')),
+                    bonificacion: aNum(val(prefijo, guid, 'Bonificacion')),
+                    totalIVA: tIva != null ? aNum(tIva) : aNum(val(prefijo, guid, 'Total')),
+                    campos: Array.from(document.querySelectorAll(`[name^="${prefijo}[${guid}]."]`)).map(e => e.name.split('].')[1]),
+                });
+            });
+            return out;
+        }, caso.documento);
+
+        console.log('\n📊 DETALLE POR LÍNEA (Precio / Cantidad / Bonif. / Total c.IVA):');
+        lineasDetalle.forEach((l, i) =>
+            console.log(`   Línea ${i + 1}: precio=${l.precio}  cant=${l.cantidad}  bonif=${l.bonificacion}  total=${l.totalIVA}`));
+
+        // Precio por producto (unitario) para Discord: SOLO si el caso usa rango
+        // de precios (si no, no aporta y no se muestra el campo).
+        const tieneRango = Object.keys(caso.configuraciones || {}).some(k =>
+            k.replace(/\s+/g, '_').replace('rango_de_precios', 'rango_precios') === 'rango_precios');
+        if (tieneRango) {
+            precioUnitario = fmtPrecios(lineasDetalle.map(l => l.precio).filter(p => p > 0));
+        }
+
+        // Cada campo debe coincidir entre todas las líneas (mismas cargas = mismo
+        // producto y misma cantidad). Si alguno no coincide, el caso falla.
+        const camposComparar = [
+            ['precio', 'Precio (unitario)'],
+            ['cantidad', 'Cantidad'],
+            ['bonificacion', 'Bonificación'],
+            ['totalIVA', 'Total c/IVA'],
+        ];
+        let camposConsistentes = lineasDetalle.length > 0;
+        for (const [campo, etiqueta] of camposComparar) {
+            const distintos = [...new Set(lineasDetalle.map(l => l[campo]))];
+            if (distintos.length === 1) {
+                console.log(`   ✅ ${etiqueta}: coincide en todas las líneas (${distintos[0]})`);
+            } else {
+                camposConsistentes = false;
+                console.log(`   ❌ ${etiqueta}: NO coincide -> ${distintos.join(', ')}`);
+            }
+        }
+        if (lineasDetalle.length && lineasDetalle[0].precio === 0) {
+            console.log(`   ⚠️ "Precio" vino 0: quizá el campo no se llama ".Precio". Campos de la línea: ${lineasDetalle[0].campos.join(', ')}`);
+        }
+
             // ==================== 4. VERIFICACIONES ====================
             console.log('\n📊 VERIFICACIÓN ANTES de configuraciones:');
             const preciosUnicosAntes = [...new Set(preciosAntes.map(p => p.precio))];
@@ -210,7 +272,8 @@ if (!urlExcel) {
             
             console.log('\n📊 VERIFICACIÓN DESPUÉS de configuraciones:');
             const preciosUnicosDespues = [...new Set(preciosDespues)];
-            exito = preciosDespues.length > 0 && preciosUnicosDespues.length === 1;
+            // Éxito = hay precios, coinciden, y los 4 campos por línea son consistentes.
+            exito = preciosDespues.length > 0 && preciosUnicosDespues.length === 1 && camposConsistentes;
             precioDespues = fmtPrecios(preciosDespues);
             if (preciosUnicosDespues.length === 1) {
                 console.log(`✅ DESPUÉS: Todos los productos tienen el mismo precio: ${preciosUnicosDespues[0]}`);
@@ -237,6 +300,7 @@ if (!urlExcel) {
             tiposCarga,
             metodosEsperados,
             configs: configsAplicadas,
+            precioUnitario,
             precioAntes,
             precioDespues,
         });

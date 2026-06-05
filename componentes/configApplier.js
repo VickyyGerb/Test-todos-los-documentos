@@ -1,3 +1,8 @@
+
+function canonConfig(nombre) {
+    return String(nombre || '').replace(/\s+/g, '_').replace('rango_de_precios', 'rango_precios');
+}
+
 class ConfigApplier {
     constructor(page, documento) {
         this.page = page;
@@ -8,11 +13,8 @@ class ConfigApplier {
         console.log('📋 Aplicando configuraciones:', configuraciones);
         console.log('📋 Código producto recibido en aplicar:', codigoProducto);
 
-        // Orden fijo de aplicación (NO el del Excel): la alícuota va casi al final
-        // porque otras configs la resetean; descuento_global cierra. Las que no
-        // estén acá se aplican después, en el orden en que vengan.
-        const orden = ['lista_precios', 'moneda', 'cotizacion', 'descuento_item', 'alicuota', 'descuento_global'];
-        const peso = (nombre) => { const i = orden.indexOf(nombre); return i === -1 ? orden.length : i; };
+        const orden = ['rango_precios', 'lista_precios', 'moneda', 'cotizacion', 'descuento_item', 'alicuota', 'descuento_global'];
+        const peso = (nombre) => { const i = orden.indexOf(canonConfig(nombre)); return i === -1 ? orden.length : i; };
         const entradas = Object.entries(configuraciones).sort((a, b) => peso(a[0]) - peso(b[0]));
 
         const aplicadas = {};
@@ -29,7 +31,6 @@ class ConfigApplier {
             const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
             const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
             const IVA = 0.21;
-            // Remito no maneja IVA: el Total ya es el precio final (factor 1).
             const factor = doc === 'remito' ? 1 : (1 + IVA);
             const precioConIva = (prefijo, guid) => {
                 const tIva = document.querySelector(`input[name="${prefijo}[${guid}].TotalIVA"]`);
@@ -97,6 +98,67 @@ class ConfigApplier {
         }
 
         await this.page.waitForTimeout(1000); // que se asiente el recálculo final
+    }
+
+    async aplicarRangoPrecios(valor) {
+        const cantidad = parseFloat(String(valor).replace(',', '.'));
+        if (!(cantidad > 0)) {
+            console.log(`   ⚠️ Rango de precios: cantidad inválida "${valor}"`);
+            return false;
+        }
+
+        const items = await this.page.evaluate(() => {
+            const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
+            const out = [];
+            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
+                const m = inp.name.match(reId);
+                if (m && inp.value && inp.value.trim() !== '') out.push({ prefijo: m[1], guid: m[2] });
+            });
+            return out;
+        });
+
+        console.log(`   Aplicando cantidad ${cantidad} a ${items.length} línea(s) (rango de precios)...`);
+
+        const cantidadActual = async (it) => {
+            const input = this.page.locator(`input[name="${it.prefijo}[${it.guid}].Cantidad"]`);
+            if (await input.count() === 0) return NaN;
+            return parseFloat(((await input.inputValue()) || '').replace(',', '.')) || 0;
+        };
+
+        const ponerCantidad = async (it) => {
+            const input = this.page.locator(`input[name="${it.prefijo}[${it.guid}].Cantidad"]`);
+            if (await input.count() === 0) {
+                const campos = await this.page.evaluate((g) =>
+                    Array.from(document.querySelectorAll('input[name], select[name]'))
+                        .map(e => e.name).filter(n => n.includes(g)), it.guid);
+                console.log(`   ⚠️ No encontré el campo "Cantidad" de la línea. Campos: ${campos.join(', ') || '(ninguno)'}`);
+                return;
+            }
+            await input.scrollIntoViewIfNeeded();
+            await input.evaluate(el => el.removeAttribute('readonly'));
+            await input.click();
+            await input.fill(String(cantidad));
+            await this.page.keyboard.press('Tab'); // blur -> recalcula precio/escalón
+            await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            await this.page.waitForTimeout(800);
+        };
+
+        for (let pasada = 1; pasada <= 4; pasada++) {
+            const faltan = [];
+            for (const it of items) {
+                if (await cantidadActual(it) !== cantidad) faltan.push(it);
+            }
+            if (faltan.length === 0) {
+                console.log(`   ✅ Las ${items.length} línea(s) quedaron con cantidad = ${cantidad}`);
+                break;
+            }
+            console.log(`   Pasada ${pasada}: ${faltan.length} línea(s) sin la cantidad, re-aplicando...`);
+            for (const it of faltan) await ponerCantidad(it);
+            await this.page.waitForTimeout(1000);
+        }
+
+        await this.page.waitForTimeout(1000); 
+        return true;
     }
 
     async _descubrirSelectsAlicuota(objetivo) {
@@ -313,7 +375,15 @@ class ConfigApplier {
         console.log(`⚙️ Aplicando configuración: ${nombre} = ${valor}`);
 
         let aplicada = false;
-        switch(nombre) {
+        switch(canonConfig(nombre)) {
+            case 'rango_precios':
+                try {
+                    aplicada = await this.aplicarRangoPrecios(valor);
+                } catch (e) {
+                    console.log(`   ⚠️ No pude aplicar rango de precios: ${e.message}`);
+                }
+                break;
+
             case 'descuento_global': {
                 try {
                     // Con "%" (ej. "%5" o "5%") => descuento porcentual (#Descuento).
