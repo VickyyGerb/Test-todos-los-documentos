@@ -218,17 +218,53 @@ class ProductLoader {
 
         await this.page.click('#btn-color-youtube.dropdown-toggle.btn.btn-sm');
         await this.page.getByRole('link', { name: 'Plantillas' }).click();
-        await this.page.click('#PlantillasLista_chosen .chosen-single.chosen-default');
-        await this.page.keyboard.press('ArrowDown');
-        await this.page.keyboard.press('Enter');
-        await this.page.waitForTimeout(3000);
+        await this.page.waitForTimeout(1000);
+
+        await this.seleccionarPlantillaEnChosen(nombrePlantilla);
+
         await this.page.locator('.modal-footer:has-text("Asociar") a.btn-success').click();
         await this.page.waitForTimeout(3000);
 
         return await this.leerPrecioNuevo(antes);
     }
 
-   
+    // Elige la plantilla por NOMBRE en el combo "chosen" (#PlantillasLista).
+    // Antes se hacía ArrowDown+Enter, que elegía SIEMPRE la primera de la lista
+    // ignorando el nombre del Excel. Ahora se escribe el nombre en el buscador del
+    // chosen y se clickea la coincidencia; si la UI falla, se setea el <select>
+    // por jQuery (mismo patrón que moneda/alícuota en configApplier).
+    async seleccionarPlantillaEnChosen(nombrePlantilla) {
+        try {
+            await this.page.click('#PlantillasLista_chosen .chosen-single');
+            await this.page.waitForTimeout(400);
+
+            const search = this.page.locator('#PlantillasLista_chosen .chosen-search input').first();
+            await search.waitFor({ state: 'visible', timeout: 4000 });
+            await search.type(String(nombrePlantilla), { delay: 50 }); // type = dispara el filtro del chosen
+            await this.page.waitForTimeout(800);
+
+            const opcion = this.page.locator('#PlantillasLista_chosen .chosen-results li.active-result').first();
+            await opcion.waitFor({ state: 'visible', timeout: 4000 });
+            await opcion.click();
+        } catch (e) {
+            console.log(`   ⚠️ No pude elegir la plantilla por UI (${e.message}); intento por jQuery...`);
+            const ok = await this.page.evaluate((nombre) => {
+                const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+                const s = document.getElementById('PlantillasLista');
+                if (!s) return false;
+                const opt = Array.from(s.options).find(o => norm(o.textContent).includes(norm(nombre)));
+                if (!opt) return false;
+                s.value = opt.value;
+                if (window.jQuery) { try { jQuery(s).val(opt.value).trigger('chosen:updated').trigger('change'); } catch (e) {} }
+                else s.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            }, nombrePlantilla);
+            if (!ok) throw new Error(`No encontré la plantilla "${nombrePlantilla}" en el combo de plantillas`);
+        }
+        await this.page.waitForTimeout(1500);
+    }
+
+
     async cargarAsignacionMultiplePedido(codigoInterno, cantidad = 1) {
         const antes = await this.snapshotGuids();
 
@@ -265,10 +301,8 @@ class ProductLoader {
         });
         await this.page.waitForTimeout(2000);
 
-        await this.page.click('#PlantillasLista_chosen .chosen-single.chosen-default');
-        await this.page.keyboard.press('ArrowDown');
-        await this.page.keyboard.press('Enter');
-        await this.page.waitForTimeout(3000);
+        await this.seleccionarPlantillaEnChosen(nombrePlantilla);
+
         await this.page.locator('.modal-footer:has-text("Asociar") a.btn-success').click();
         await this.page.waitForTimeout(3000);
 
