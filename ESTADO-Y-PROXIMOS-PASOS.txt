@@ -197,9 +197,35 @@ LO QUE SE HIZO HOY (2026-06-05)
 ========================================================================
 PENDIENTE  <<< EMPEZAR ACÁ
 ========================================================================
-1. REGLAS DE DESCUENTO (config que falta): descuentos por cuenta / marca /
-   categoría, etc. Igual que rango de precios, conviene CONFIRMAR cómo se configura
-   en Fidel antes de tocar código (no a ciegas).
+1. REGLAS DE DESCUENTO (config que falta) — DISEÑO ACORDADO 2026-06-05, falta
+   AVERIGUAR un par de cosas en Fidel antes de codear.
+   - QUÉ ES: una regla de descuento se define en OTRO MÓDULO de Fidel (no en la
+     factura). Tipos: por CLIENTE, por ZONA o por VENDEDOR. Se elige el tipo + a
+     qué cliente/zona/vendedor aplica + el descuento.
+   - CLAVE: el descuento NO se ve en la factura normal; aparece recién al
+     SELECCIONAR el cliente/zona/vendedor que tiene la regla.
+   - ENFOQUE ACORDADO: la regla queda PRE-CREADA a mano en Fidel; el test NO la
+     crea (eso sería tocar config persistente del sistema, riesgoso). El test solo
+     VERIFICA el efecto: hace la factura para ese cliente/zona/vendedor, carga el
+     producto y confirma que el precio viene con el descuento esperado.
+   - POR TIPO:
+       * por CLIENTE: ya sale de la columna ClienteID (elegir un cliente con regla).
+       * por ZONA: la zona suele ser propiedad del cliente -> también vía ClienteID
+         (un cliente de esa zona).
+       * por VENDEDOR: a CONFIRMAR si la factura tiene un selector de vendedor que
+         el test deba elegir -> sería una columna nueva "Vendedor".
+   - PENDIENTE DE AVERIGUAR (experimento a mano en Fidel):
+       1) Factura a un cliente SIN regla -> cargar 00069 -> anotar precio (~1995).
+       2) Factura a un cliente CON regla por cliente -> cargar 00069 -> mirar:
+          ¿el precio bajó? ¿apareció algo en la columna Bonificación, o el descuento
+          está metido en Precio/Total sin mostrar el %? ¿se aplicó solo al elegir el
+          cliente o hubo que hacer algo más?
+       Con eso se sabe QUÉ campo leer y CÓMO validar.
+   - DISEÑO TENTATIVO (cuando se confirme lo anterior): empezar por "por cliente".
+     Fila con Documento=factura, ClienteID = cliente con regla, + columna nueva
+     "Descuento_Esperado" (% o precio del escalón). El test carga el producto y
+     verifica que el precio/bonificación refleje ese esperado. Después extender a
+     zona y vendedor.
 
 2. CASOS LÍMITE / NEGATIVOS: revisar el set de ~35 casos (descuento 0/100/decimal/
    negativo, CuentaID inválido, producto inexistente, fila sin métodos, etc.).
