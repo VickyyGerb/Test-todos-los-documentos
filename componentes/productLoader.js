@@ -1,4 +1,5 @@
 const { expect } = require('@playwright/test');
+const { leerLineasProducto } = require('../utiles/lecturaPrecios');
 
 class ProductLoader {
     constructor(page, documento) {
@@ -45,17 +46,11 @@ class ProductLoader {
             return 0;
         }
 
-        const precio = await this.page.evaluate(({ info, doc }) => {
-            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
-            const IVA = 0.21;
-            
-            const tIva = document.querySelector(`input[name="${info.prefijo}[${info.guid}].TotalIVA"]`);
-            if (tIva) return aNumero(tIva.value);
-            const tot = document.querySelector(`input[name="${info.prefijo}[${info.guid}].Total"]`);
-            if (!tot) return 0;
-            const factor = doc === 'remito' ? 1 : (1 + IVA);
-            return Math.round(aNumero(tot.value) * factor * 100) / 100;
-        }, { info, doc: this.documento });
+        // Precio con IVA real (sin asumir 21%): lectura compartida, buscando la
+        // línea nueva por su guid.
+        const lineas = await this.page.evaluate(leerLineasProducto, this.documento);
+        const linea = lineas.find(l => l.guid === info.guid);
+        const precio = linea ? linea.total : 0;
 
         console.log(`   Precio del producto cargado: ${precio}`);
         return precio;

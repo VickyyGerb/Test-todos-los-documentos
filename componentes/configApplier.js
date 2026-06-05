@@ -1,3 +1,4 @@
+const { leerLineasProducto } = require('../utiles/lecturaPrecios');
 
 function canonConfig(nombre) {
     return String(nombre || '').replace(/\s+/g, '_').replace('rango_de_precios', 'rango_precios');
@@ -26,28 +27,9 @@ class ConfigApplier {
     }
 
     async leerPrecios() {
-        
-        const precios = await this.page.evaluate((doc) => {
-            const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
-            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
-            const IVA = 0.21;
-            const factor = doc === 'remito' ? 1 : (1 + IVA);
-            const precioConIva = (prefijo, guid) => {
-                const tIva = document.querySelector(`input[name="${prefijo}[${guid}].TotalIVA"]`);
-                if (tIva) return aNumero(tIva.value);
-                const tot = document.querySelector(`input[name="${prefijo}[${guid}].Total"]`);
-                return tot ? Math.round(aNumero(tot.value) * factor * 100) / 100 : 0;
-            };
-            const resultados = [];
-            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
-                const m = inp.name.match(reId);
-                if (!m || !inp.value || inp.value.trim() === '') return;
-                const precio = precioConIva(m[1], m[2]);
-                if (precio > 0) resultados.push(precio);
-            });
-            return resultados;
-        }, this.documento);
-
+        // IVA real (sin asumir 21%): se delega en la lectura compartida.
+        const lineas = await this.page.evaluate(leerLineasProducto, this.documento);
+        const precios = lineas.map(l => l.total).filter(p => p > 0);
         console.log(`   Precios obtenidos: ${precios.join(', ')}`);
         return precios;
     }

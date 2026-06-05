@@ -5,6 +5,7 @@ const { ProductLoader } = require('./componentes/productLoader');
 const { DocumentsPage } = require('./paginas/documents');
 const { ConfigApplier } = require('./componentes/configApplier');
 const { notificarDiscord } = require('./utiles/discordNotifier');
+const { leerLineasProducto } = require('./utiles/lecturaPrecios');
 require('dotenv').config();
 const fs = require('fs');
 const util = require('util');
@@ -171,30 +172,11 @@ if (!urlExcel) {
 
         await page.waitForTimeout(3000);
 
-        // Leer el precio de cada producto cargado. Detectamos los productos por
-        // ProductoId (existe en todo documento) y leemos TotalIVA si existe
-        // (facturas → con IVA) o, si no, Total (presupuestos → sin IVA por línea).
-        const preciosDespues = await page.evaluate((doc) => {
-            const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
-            const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
-            const IVA = 0.21;
-            // Remito no maneja IVA: el Total ya es el precio final (factor 1).
-            const factor = doc === 'remito' ? 1 : (1 + IVA);
-            const precioConIva = (prefijo, guid) => {
-                const tIva = document.querySelector(`input[name="${prefijo}[${guid}].TotalIVA"]`);
-                if (tIva) return aNumero(tIva.value);
-                const tot = document.querySelector(`input[name="${prefijo}[${guid}].Total"]`);
-                return tot ? Math.round(aNumero(tot.value) * factor * 100) / 100 : 0;
-            };
-            const resultados = [];
-            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
-                const m = inp.name.match(reId);
-                if (!m || !inp.value || inp.value.trim() === '') return;
-                const precio = precioConIva(m[1], m[2]);
-                if (precio > 0) resultados.push(precio);
-            });
-            return resultados;
-        }, caso.documento);
+        // Lectura única y agnóstica al documento (IVA real, sin asumir 21%).
+        // De acá salen TANTO el detalle por línea como los precios "después",
+        // así no pueden contradecirse (era el bug en presupuesto: 12069.75 vs 9975).
+        const lineasDetalle = await page.evaluate(leerLineasProducto, caso.documento);
+        const preciosDespues = lineasDetalle.map(l => l.total).filter(p => p > 0);
 
         console.log(`   Precios DESPUÉS: ${preciosDespues.join(', ')}`);
         console.log(`   Cantidad de precios: ${preciosDespues.length}`);
@@ -202,33 +184,9 @@ if (!urlExcel) {
         // Detalle por línea para comparar los 4 campos de la grilla entre cargas:
         // Precio (unitario) / Cantidad / Bonificación / Total con IVA. Como las
         // líneas son el mismo producto con la misma cantidad, deben coincidir.
-        const lineasDetalle = await page.evaluate((doc) => {
-            const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
-            const aNum = (t) => parseFloat((t || '').replace(/\./g, '').replace(',', '.')) || 0;
-            const val = (prefijo, guid, campo) => {
-                const el = document.querySelector(`[name="${prefijo}[${guid}].${campo}"]`);
-                return el ? el.value : null;
-            };
-            const out = [];
-            document.querySelectorAll('input[name$=".ProductoId"]').forEach(inp => {
-                const m = inp.name.match(reId);
-                if (!m || !inp.value || inp.value.trim() === '') return;
-                const prefijo = m[1], guid = m[2];
-                const tIva = val(prefijo, guid, 'TotalIVA');
-                out.push({
-                    precio: aNum(val(prefijo, guid, 'Precio')),
-                    cantidad: aNum(val(prefijo, guid, 'Cantidad')),
-                    bonificacion: aNum(val(prefijo, guid, 'Bonificacion')),
-                    totalIVA: tIva != null ? aNum(tIva) : aNum(val(prefijo, guid, 'Total')),
-                    campos: Array.from(document.querySelectorAll(`[name^="${prefijo}[${guid}]."]`)).map(e => e.name.split('].')[1]),
-                });
-            });
-            return out;
-        }, caso.documento);
-
-        console.log('\n📊 DETALLE POR LÍNEA (Precio / Cantidad / Bonif. / Total c.IVA):');
+        console.log('\n📊 DETALLE POR LÍNEA (Precio / Cantidad / Bonif. / Total):');
         lineasDetalle.forEach((l, i) =>
-            console.log(`   Línea ${i + 1}: precio=${l.precio}  cant=${l.cantidad}  bonif=${l.bonificacion}  total=${l.totalIVA}`));
+            console.log(`   Línea ${i + 1}: precio=${l.precio}  cant=${l.cantidad}  bonif=${l.bonificacion}  total=${l.total}  [${l.fuente}]`));
 
         // Precio por producto (unitario) para Discord: SOLO si el caso usa rango
         // de precios (si no, no aporta y no se muestra el campo).
@@ -244,7 +202,7 @@ if (!urlExcel) {
             ['precio', 'Precio (unitario)'],
             ['cantidad', 'Cantidad'],
             ['bonificacion', 'Bonificación'],
-            ['totalIVA', 'Total c/IVA'],
+            ['total', 'Total'],
         ];
         let camposConsistentes = lineasDetalle.length > 0;
         for (const [campo, etiqueta] of camposComparar) {
