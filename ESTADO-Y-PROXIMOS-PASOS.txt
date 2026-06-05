@@ -1,6 +1,6 @@
 ========================================================================
 ESTADO DEL PROYECTO — Test de carga de productos (Playwright)
-Última actualización: 2026-06-04
+Última actualización: 2026-06-05
 ========================================================================
 
 QUÉ HACE EL PROYECTO
@@ -143,57 +143,66 @@ cubre, así que no bloquea.
 
 
 ========================================================================
-PARA MAÑANA (2026-06-05)  <<< EMPEZAR ACÁ
+LO QUE SE HIZO HOY (2026-06-05)
 ========================================================================
-1. VERIFICAR los 3 fixes de robustez que se commitearon hoy pero NO se corrieron
-   todavía (commit 6c5c438). Correr una fila y mirar resultado-corrida.log:
-   - moneda + cotización: poner "moneda: Dólar, cotizacion: 2000" en una factura.
-     Esperar en el log "Intento 1: moneda quedó en Dólar..." -> "✅ Moneda aplicada"
-     y que el precio final dé igual que a mano (dio 8,86 con esos valores).
-   - carga manual: confirmar que NO carga el producto dos veces cuando el 1er
-     intento tarda (mirar que la cantidad de ítems sea la correcta).
-   - notificación Discord: si falta un método, debe decir "EXITOSO (3 de 4 métodos)".
+- PLANTILLA: elegir la plantilla POR NOMBRE (el del Excel), no la primera de la
+  lista. Antes hacía ArrowDown+Enter (siempre la 1ª). Ahora escribe el nombre en
+  el buscador del chosen y elige la coincidencia, con fallback por jQuery. Helper
+  seleccionarPlantillaEnChosen reutilizado en factura/venta y pedido. (commit faf0289)
 
-2. CONFIGS QUE FALTAN (rango de precios y reglas de descuento): NO se pueden hacer
-   a ciegas, dependen de cómo esté configurada la cuenta en Fidel. ANTES de tocar
-   código, AVERIGUAR con quien sepa:
-   - rango de precios: es precio por CANTIDAD (escala de descuento por cantidad).
-     Ejemplo del producto de prueba actual:
-        0  a 5  (>0, <=5)   -> 2.000 c/u  (0%  desc.)
-        5  a 10 (>5, <=10)  -> 1.800 c/u  (10% desc.)
-        10 a 15 (>10,<=15)  -> 1.600 c/u  (20% desc.)
-     HALLAZGO (2026-06-05, PENDIENTE DE CONFIRMAR BIEN): el escalón parece ser
-     POR RENGLÓN, no por la suma de cantidades del producto en todo el documento.
-     O sea, cada carga/renglón mira SOLO su propia cantidad; el descuento del
-     rango se aplica a esa línea cuando su cantidad cruza el rango, sin importar
-     las otras cargas. (Hay que confirmarlo con quien sepa.)
-     IMPLICACIÓN DE DISEÑO si se confirma "por renglón":
-        * Diseño SIMPLE: agregar columna "Cantidad" y cargar los 4 métodos con la
-          MISMA cantidad N. Como las 4 líneas tienen igual cantidad, sus totales
-          coinciden -> la comparación actual ("todos dan el mismo precio") sigue
-          sirviendo TAL CUAL (no hay que pasar a precio unitario).
-        * Opcional: columna "Precio_Esperado" (precio unitario del escalón) para
-          validar CORRECCIÓN, no sólo consistencia.
-        * Archivos a tocar: googleSheetsReader.js (leer Cantidad/Precio_Esperado)
-          + test-rapido.js (pasarla + verificar esperado) + productLoader.js
-          (setear la cantidad en la línea; campo asumido <prefijo>[guid].Cantidad,
-          CONFIRMAR el selector real en el DOM; recálculo es roundtrip del server
-          como la alícuota -> quizá necesite re-aplicación por pasadas).
-        * Si en cambio fuera "por suma del total": las líneas tendrían cantidades
-          distintas -> sus totales NO coincidirían -> habría que comparar por
-          PRECIO UNITARIO (total de la línea / su cantidad). Más cambio.
-     NOTA: se intentó implementar el 2026-06-05 y se REVIRTIÓ (no estaba claro el
-     modelo). El commit del fix de plantillas (faf0289) sí quedó.
-   - reglas de descuento: descuentos por cuenta / marca / categoría, etc.
-   (Si no hay con quién confirmar, saltear esto y hacer el punto 3 o 4.)
+- RANGO DE PRECIOS (escala de descuento por cantidad): implementado y VERIFICADO.
+    * Es una CONFIG dentro de Configuraciones: "rango de precios: N" (alias
+      rango_precios / rango_de_precios). N = cantidad de unidades por cada carga.
+    * configApplier.aplicarRangoPrecios setea la cantidad N en CADA línea cargada
+      (campo <prefijo>[guid].Cantidad) y deja que FIDEL recalcule el escalón.
+      Re-aplica por pasadas (roundtrip del server). NO escribe el precio, sólo la
+      cantidad: el precio lo baja Fidel solo (eso es lo que se testea).
+    * Modelo confirmado: el escalón es POR RENGLÓN (cada línea mira su propia
+      cantidad). Como las 4 cargas quedan con la MISMA cantidad, coinciden.
+    * El descuento del escalón aparece en el PRECIO unitario (.Precio), no en
+      Bonificación. Producto de prueba (00069): cant 6 -> 1800/u (factura),
+      cant 5 -> 1995/u (sigue en el 1er tramo, correcto). (commit a309099)
 
-3. ALTERNATIVA SIN DEPENDER DE NADIE (para avanzar igual): sumar la columna
-   "Cantidad" al Sheet y pasarla a las cargas. Es concreto y deja listo el
-   terreno para "rango de precios por cantidad". Archivos: googleSheetsReader.js
-   (leer la columna) + test-rapido.js (pasarla) + productLoader.js (usarla).
+- COMPARACIÓN AMPLIADA: el test ahora compara POR LÍNEA, entre todas las cargas,
+  los 4 campos de la grilla: Precio (unitario) / Cantidad / Bonificación / Total.
+  El caso falla si alguno no coincide. (test-rapido)
 
-4. CASOS LÍMITE / NEGATIVOS: revisar el set de 35 casos (descuento 0/100/decimal/
-   negativo, CuentaID inválido, producto inexistente, sin métodos, etc.).
+- LECTURA DE PRECIOS = LO QUE MUESTRA FIDEL (sin inventar IVA). Bug viejo: en
+  presupuesto/pedido no hay .TotalIVA por línea y el código hacía Total x 1.21
+  (IVA 21% fijo) -> daba números que no existen en Fidel (este producto es 5% y
+  presupuesto/pedido ni muestran IVA). Encima estaba duplicado en 3 lugares que se
+  contradecían (12069.75 vs 9975).
+    * Nueva util utiles/lecturaPrecios.js (leerLineasProducto): lee cada línea con
+      TotalIVA si existe (factura/venta_unificada) o el Total NETO si no
+      (presupuesto/pedido/remito). SIN calcular IVA.
+    * La usan productLoader.leerPrecioNuevo, configApplier.leerPrecios y
+      test-rapido (preciosDespues y el detalle salen de la MISMA lectura).
+    * El log muestra la fuente por línea: [TotalIVA] o [Total (neto)].
+    * Verificado: presupuesto/pedido -> [Total (neto)] 9975; factura/venta_unif
+      -> [TotalIVA]; remito -> neto. (commit 746c94e)
+
+- DISCORD: "Precio x producto (unit.)" SÓLO si el caso usa rango de precios; sin
+  configuraciones muestra un único campo "Precio"; con configs, "antes" en su
+  línea y "x producto"+"después" juntos en la misma. (commit a309099)
+
+- 3 FIXES DE ROBUSTEZ (commit 6c5c438) VERIFICADOS corriendo:
+    * moneda + cotización: convierte a USD OK (1995 ARS / 2000 ~= 1 USD), coincide
+      con Fidel a mano. (OJO: el "8,86" viejo era de OTRO producto, el de 15000.)
+    * carga manual: reintenta pero NO duplica (cantidad de precios = métodos que
+      cargaron).
+    * notificación Discord honesta: dijo "EXITOSO (3 de 4 métodos)" cuando faltó
+      uno (código de barra inexistente -> omitido).
+
+
+========================================================================
+PENDIENTE  <<< EMPEZAR ACÁ
+========================================================================
+1. REGLAS DE DESCUENTO (config que falta): descuentos por cuenta / marca /
+   categoría, etc. Igual que rango de precios, conviene CONFIRMAR cómo se configura
+   en Fidel antes de tocar código (no a ciegas).
+
+2. CASOS LÍMITE / NEGATIVOS: revisar el set de ~35 casos (descuento 0/100/decimal/
+   negativo, CuentaID inválido, producto inexistente, fila sin métodos, etc.).
 
 
 ========================================================================
@@ -215,9 +224,15 @@ Alícuota (IVA por ítem) quedó IMPLEMENTADA en factura (2026-06-04): campo
 TipoIVAId, se setea por jQuery y se re-aplica hasta que aguanta el recálculo del
 servidor. "alicuota: 27" sube el precio a 19050 (vs 18150 con 21%).
 
->>> PRÓXIMO PASO: avanzar con las configuraciones pendientes (rango de precios y
-    reglas de descuento), una vez que se confirme cómo funcionan en el sistema.
-    Todos los documentos y el resto de las configs ya están cubiertos.
+Rango de precios quedó IMPLEMENTADO y VERIFICADO (2026-06-05): config
+"rango de precios: N", setea la cantidad por línea y Fidel recalcula el escalón.
+También se arregló la lectura de precios (lee lo que muestra Fidel, sin inventar
+IVA) y se verificaron los 3 fixes de robustez (moneda/cotización, manual sin
+duplicar, noti "3 de 4").
+
+>>> PRÓXIMO PASO: reglas de descuento (confirmar cómo se configura en Fidel) y/o
+    casos límite/negativos. Todos los documentos y el resto de las configs ya
+    están cubiertos.
 
 
 ========================================================================
@@ -246,10 +261,23 @@ CON QUÉ SEGUIR (para cubrir todo)
    NOTA: venta_unificada NO tiene moneda ni cotización -> ambas se omiten a
    propósito (skip explícito en configApplier, como lista_precios en pedido).
 
-3. [PENDIENTE] Configuraciones que faltan:
-   - rango de precios
-   - reglas de descuento
-   (Se dejaron para cuando se confirme cómo funcionan en el sistema.)
+2f.[HECHO ✓] Plantilla por nombre (2026-06-05): elige la plantilla del Excel, no
+   la primera de la lista. (commit faf0289)
+
+2g.[HECHO ✓] Rango de precios (2026-06-05): config "rango de precios: N", setea la
+   cantidad por línea y Fidel recalcula el escalón. Escalón POR RENGLÓN.
+   Verificado en factura/presupuesto/pedido. (commit a309099)
+
+2h.[HECHO ✓] Lectura de precios = lo que muestra Fidel, sin inventar IVA
+   (2026-06-05): nueva util lecturaPrecios.js, saca el ×1.21 de presupuesto/pedido,
+   unifica las 3 lecturas. (commit 746c94e)
+
+2i.[HECHO ✓] 3 fixes de robustez (commit 6c5c438) VERIFICADOS corriendo
+   (2026-06-05): moneda+cotización, manual sin duplicar, noti "3 de 4 métodos".
+
+3. [PENDIENTE] Configuración que falta:
+   - reglas de descuento (descuentos por cuenta / marca / categoría).
+   (Se deja para cuando se confirme cómo funciona en el sistema.)
 
 4. [MEJORADO ✓] Robustez (2026-06-04):
    - Carga manual: ya no duplica el producto si carga tarde (>8s). Antes de
@@ -274,10 +302,14 @@ NOTAS TÉCNICAS ÚTILES
     utiles/googleSheetsReader.js  baja el Sheet como CSV y parsea los casos
     paginas/documents.js ........ navega a cada tipo de documento
     componentes/productLoader.js  carga de productos (4 métodos + sección Pedido)
-    componentes/configApplier.js  aplica las configuraciones
+    componentes/configApplier.js  aplica las configuraciones (incl. rango_precios)
+    utiles/lecturaPrecios.js .... lee las líneas con el valor que MUESTRA Fidel
+                                  (compartida por los 3 lugares que leían precio)
 - Detección de productos (regex, en 5 lugares):
     /^(?:ListaProducto(?!Libre)\w*?|ProductosLista)\[<guid>\]\.<campo>$/
-- Precio con IVA: TotalIVA si existe; si no, Total x 1.21 (IVA = 21%, ajustable).
+- Precio reportado = lo que MUESTRA Fidel (utiles/lecturaPrecios.js): TotalIVA si
+  existe (factura/venta_unificada); si no, Total NETO (presupuesto/pedido/remito).
+  NO se calcula IVA (el viejo Total x 1.21 daba números que no existían en Fidel).
 - Diagnósticos: patrón de escribir un debug-*.txt (ignorado por git) para
   inspeccionar el DOM cuando algo no se encuentra. Borrar al terminar.
 - La carpeta de trabajo REAL es:
