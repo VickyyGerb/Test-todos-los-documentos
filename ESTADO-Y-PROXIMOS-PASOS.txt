@@ -157,9 +157,33 @@ PARA MAÑANA (2026-06-05)  <<< EMPEZAR ACÁ
 2. CONFIGS QUE FALTAN (rango de precios y reglas de descuento): NO se pueden hacer
    a ciegas, dependen de cómo esté configurada la cuenta en Fidel. ANTES de tocar
    código, AVERIGUAR con quien sepa:
-   - rango de precios: parece ser precio por CANTIDAD (si la cuenta lo tiene
-     activado). Habría que sumar una columna "Cantidad" al Sheet y usarla al
-     cargar (los métodos cargar* ya reciben un parámetro cantidad, hoy fijo en 1).
+   - rango de precios: es precio por CANTIDAD (escala de descuento por cantidad).
+     Ejemplo del producto de prueba actual:
+        0  a 5  (>0, <=5)   -> 2.000 c/u  (0%  desc.)
+        5  a 10 (>5, <=10)  -> 1.800 c/u  (10% desc.)
+        10 a 15 (>10,<=15)  -> 1.600 c/u  (20% desc.)
+     HALLAZGO (2026-06-05, PENDIENTE DE CONFIRMAR BIEN): el escalón parece ser
+     POR RENGLÓN, no por la suma de cantidades del producto en todo el documento.
+     O sea, cada carga/renglón mira SOLO su propia cantidad; el descuento del
+     rango se aplica a esa línea cuando su cantidad cruza el rango, sin importar
+     las otras cargas. (Hay que confirmarlo con quien sepa.)
+     IMPLICACIÓN DE DISEÑO si se confirma "por renglón":
+        * Diseño SIMPLE: agregar columna "Cantidad" y cargar los 4 métodos con la
+          MISMA cantidad N. Como las 4 líneas tienen igual cantidad, sus totales
+          coinciden -> la comparación actual ("todos dan el mismo precio") sigue
+          sirviendo TAL CUAL (no hay que pasar a precio unitario).
+        * Opcional: columna "Precio_Esperado" (precio unitario del escalón) para
+          validar CORRECCIÓN, no sólo consistencia.
+        * Archivos a tocar: googleSheetsReader.js (leer Cantidad/Precio_Esperado)
+          + test-rapido.js (pasarla + verificar esperado) + productLoader.js
+          (setear la cantidad en la línea; campo asumido <prefijo>[guid].Cantidad,
+          CONFIRMAR el selector real en el DOM; recálculo es roundtrip del server
+          como la alícuota -> quizá necesite re-aplicación por pasadas).
+        * Si en cambio fuera "por suma del total": las líneas tendrían cantidades
+          distintas -> sus totales NO coincidirían -> habría que comparar por
+          PRECIO UNITARIO (total de la línea / su cantidad). Más cambio.
+     NOTA: se intentó implementar el 2026-06-05 y se REVIRTIÓ (no estaba claro el
+     modelo). El commit del fix de plantillas (faf0289) sí quedó.
    - reglas de descuento: descuentos por cuenta / marca / categoría, etc.
    (Si no hay con quién confirmar, saltear esto y hacer el punto 3 o 4.)
 
@@ -170,9 +194,6 @@ PARA MAÑANA (2026-06-05)  <<< EMPEZAR ACÁ
 
 4. CASOS LÍMITE / NEGATIVOS: revisar el set de 35 casos (descuento 0/100/decimal/
    negativo, CuentaID inválido, producto inexistente, sin métodos, etc.).
-
-5. ⚠️ SEGURIDAD (sigue pendiente): cambiar la contraseña de admin en Fidel
-   (estuvo pública en GitHub).
 
 
 ========================================================================
@@ -242,14 +263,6 @@ CON QUÉ SEGUIR (para cubrir todo)
 5. [VALORES] Revisar casos límite ya armados (descuento 0/100/decimal/negativo)
    y los negativos (CuentaID inválido, producto inexistente, sin métodos, etc.).
    El set completo de casos está en la tabla que se armó (35 casos).
-
-
-========================================================================
-PENDIENTE IMPORTANTE DE SEGURIDAD
-========================================================================
->>> La contraseña de admin estuvo PÚBLICA en GitHub (se sacó del repo, pero
-    quien la vio pudo copiarla). HAY QUE CAMBIARLA en el sistema Fidel.
-    El .env quedó fuera de git (gitignored) y ya no se sube.
 
 
 ========================================================================
