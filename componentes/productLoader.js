@@ -1,19 +1,11 @@
 const { expect } = require('@playwright/test');
 
-// Las tablas de productos se llaman distinto según el documento:
-// ListaProductoVenta (factura/venta), ListaProductoPresupuestoVenta (presupuesto),
-// ProductosLista (pedido). Por eso los selectores matchean ese patrón y excluyen
-// los de productos libres (ListaProducto*Libre*, ProductosLibresLista).
-// REGEX (prefijo de la tabla de productos), reutilizado en varios lugares:
-//   /^(?:ListaProducto(?!Libre)\w*?|ProductosLista)\[<guid>\]\.<campo>$/
-
 class ProductLoader {
     constructor(page, documento) {
         this.page = page;
         this.documento = (documento || '').toLowerCase();
     }
 
-    // GUID de las filas de producto que YA tienen un producto cargado.
     async snapshotGuids() {
         return await this.page.evaluate(() => {
             const re = /^(?:ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
@@ -26,9 +18,6 @@ class ProductLoader {
         });
     }
 
-    // Espera a que aparezca una fila de producto nueva (GUID que no estaba en
-    // guidsAntes) y devuelve su precio CON IVA (TotalIVA). Funciona para
-    // cualquier tipo de documento y no depende de IDs select2 fijos.
     async leerPrecioNuevo(guidsAntes, timeout = 8000) {
         const intervalo = 300;
         let info = null;
@@ -59,8 +48,7 @@ class ProductLoader {
         const precio = await this.page.evaluate(({ info, doc }) => {
             const aNumero = (txt) => parseFloat((txt || '').replace(/\./g, '').replace(',', '.')) || 0;
             const IVA = 0.21;
-            // Factura → TotalIVA (con IVA real). Presupuesto/Pedido → Total × (1 + IVA).
-            // Remito no maneja IVA: el Total ya es el precio final.
+            
             const tIva = document.querySelector(`input[name="${info.prefijo}[${info.guid}].TotalIVA"]`);
             if (tIva) return aNumero(tIva.value);
             const tot = document.querySelector(`input[name="${info.prefijo}[${info.guid}].Total"]`);
@@ -73,15 +61,9 @@ class ProductLoader {
         return precio;
     }
 
-    // Abre el buscador del select2 de producto de la fila vacía (ProductoId sin
-    // valor), sin depender de #select2-chosen-N fijo ni del tipo de documento.
+
     async abrirSelectProductoVacio() {
-        // El select2 de producto tiene la clase "productoId" en su contenedor
-        // (vale para factura, presupuesto, etc.). Usamos un locator de Playwright
-        // en vez de "marcar y clickear": el locator se re-resuelve y reintenta solo
-        // si el elemento se detacha/re-renderiza (que era lo que rompía el click
-        // cuando select2 se reinicia tras elegir el cliente).
-        await this.page.waitForTimeout(1000); // dejar asentar el re-render inicial
+        await this.page.waitForTimeout(1000); 
 
         const choice = this.page.locator('.select2-container.productoId .select2-choice').first();
         try {
@@ -103,12 +85,7 @@ class ProductLoader {
     async cargarManual(codigoInterno, cantidad = 1) {
         const antes = await this.snapshotGuids();
 
-        // Reintenta una vez si el producto no queda (el re-render del select2 a
-        // veces hace que la selección no se confirme).
         for (let intento = 1; intento <= 2; intento++) {
-            // Antes de reintentar, chequear si el intento anterior cargó tarde
-            // (>8s): si ya hay un producto nuevo, usarlo y NO agregar otro
-            // (si no, se cargaba duplicado).
             if (intento > 1) {
                 const tardio = await this.leerPrecioNuevo(antes, 2500);
                 if (tardio > 0) {
@@ -119,8 +96,6 @@ class ProductLoader {
 
             await this.abrirSelectProductoVacio();
 
-            // Escribir en el buscador del dropdown activo de select2 (#select2-drop).
-            // Si no se puede ubicar, respaldo tipeando al foco.
             const search = this.page.locator('#select2-drop input.select2-input').first();
             try {
                 await search.waitFor({ state: 'visible', timeout: 5000 });
@@ -130,7 +105,6 @@ class ProductLoader {
             }
             await this.page.waitForTimeout(3000);
 
-            // Elegir el primer resultado seleccionable (más confiable que Enter).
             const resultado = this.page.locator('.select2-results li.select2-result-selectable').first();
             try {
                 await resultado.waitFor({ state: 'visible', timeout: 6000 });
@@ -151,7 +125,6 @@ class ProductLoader {
 
     async cargarPorCodigoBarra(codigoBarra) {
         if (this.documento === 'remito') {
-            // Remito no tiene carga por código de barra: se omite.
             console.log('   ⏭️ Remito no tiene carga por código de barra — se omite');
             return 0;
         }
@@ -166,8 +139,6 @@ class ProductLoader {
         return await this.leerPrecioNuevo(antes);
     }
 
-    // Cierra el select2 abierto y saca su máscara (#select2-drop-mask), que en
-    // remito intercepta el click del dropdown.
     async cerrarSelect2Abierto() {
         await this.page.keyboard.press('Escape');
         await this.page.waitForTimeout(300);
@@ -210,7 +181,6 @@ class ProductLoader {
     async cargarDesdePlantilla(nombrePlantilla) {
         if (this.documento === 'pedido') return this.cargarDesdePlantillaPedido(nombrePlantilla);
         if (this.documento === 'remito') {
-            // Remito no tiene carga por plantilla: se omite.
             console.log('   ⏭️ Remito no tiene carga por plantilla — se omite');
             return 0;
         }
@@ -228,11 +198,6 @@ class ProductLoader {
         return await this.leerPrecioNuevo(antes);
     }
 
-    // Elige la plantilla por NOMBRE en el combo "chosen" (#PlantillasLista).
-    // Antes se hacía ArrowDown+Enter, que elegía SIEMPRE la primera de la lista
-    // ignorando el nombre del Excel. Ahora se escribe el nombre en el buscador del
-    // chosen y se clickea la coincidencia; si la UI falla, se setea el <select>
-    // por jQuery (mismo patrón que moneda/alícuota en configApplier).
     async seleccionarPlantillaEnChosen(nombrePlantilla) {
         try {
             await this.page.click('#PlantillasLista_chosen .chosen-single');
@@ -309,8 +274,6 @@ class ProductLoader {
         return await this.leerPrecioNuevo(antes);
     }
 
-    // EXCLUSIVA DE REMITO. Se pone el código en #NombreProducto y se clickea
-    // afuera (blur, dentro del modal) para que el producto cargue; después Agregar.
     async cargarAsignacionMultipleRemito(codigoInterno, cantidad = 1) {
         const antes = await this.snapshotGuids();
 
