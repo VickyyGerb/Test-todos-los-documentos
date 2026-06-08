@@ -6,3 +6,5 @@ test-results/
 coverage/
 debug-*.txt
 resultado-corrida.log
+CLAUDE.md
+ESTADO-Y-PROXIMOS-PASOS.txt

@@ -1,7 +1,9 @@
 const { leerLineasProducto } = require('../utiles/lecturaPrecios');
 
 function canonConfig(nombre) {
-    return String(nombre || '').replace(/\s+/g, '_').replace('rango_de_precios', 'rango_precios');
+    let n = String(nombre || '').replace(/\s+/g, '_').replace('rango_de_precios', 'rango_precios');
+    if (/^reglas?_(de_)?descuentos?$/.test(n)) n = 'regla_descuento';
+    return n;
 }
 
 class ConfigApplier {
@@ -27,7 +29,6 @@ class ConfigApplier {
     }
 
     async leerPrecios() {
-        // IVA real (sin asumir 21%): se delega en la lectura compartida.
         const lineas = await this.page.evaluate(leerLineasProducto, this.documento);
         const precios = lineas.map(l => l.total).filter(p => p > 0);
         console.log(`   Precios obtenidos: ${precios.join(', ')}`);
@@ -35,7 +36,7 @@ class ConfigApplier {
     }
 
     async aplicarDescuentoPorItem(valor) {
-        
+
         const items = await this.page.evaluate(() => {
             const reId = /^(ListaProducto(?!Libre)\w*?|ProductosLista)\[(.+?)\]\.ProductoId$/;
             const out = [];
@@ -52,11 +53,14 @@ class ConfigApplier {
 
         const ponerBonif = async (it) => {
             const input = this.page.locator(`input[name="${it.prefijo}[${it.guid}].Bonificacion"]`);
+            if (await input.count() === 0) return;
+            const st = await input.evaluate(el => ({ disabled: el.disabled, visible: !!el.offsetParent })).catch(() => ({ disabled: true, visible: false }));
+            if (st.disabled || !st.visible) { console.log('   ⏭️ Bonificación deshabilitada/oculta en una línea -> se omite ese ítem'); return; }
             await input.scrollIntoViewIfNeeded();
-            await input.evaluate(el => el.removeAttribute('readonly')); // por si está soloLectura
-            await input.click();
+            await input.evaluate(el => el.removeAttribute('readonly'));
+            await input.click({ timeout: 6000 });
             await input.fill(String(valor));
-            await this.page.keyboard.press('Tab'); // blur -> dispara el recálculo
+            await this.page.keyboard.press('Tab');
             await this.page.waitForTimeout(400);
         };
 
@@ -79,7 +83,7 @@ class ConfigApplier {
             await this.page.waitForTimeout(800);
         }
 
-        await this.page.waitForTimeout(1000); // que se asiente el recálculo final
+        await this.page.waitForTimeout(1000);
     }
 
     async aplicarRangoPrecios(valor) {
@@ -116,11 +120,13 @@ class ConfigApplier {
                 console.log(`   ⚠️ No encontré el campo "Cantidad" de la línea. Campos: ${campos.join(', ') || '(ninguno)'}`);
                 return;
             }
+            const st = await input.evaluate(el => ({ disabled: el.disabled, visible: !!el.offsetParent })).catch(() => ({ disabled: true, visible: false }));
+            if (st.disabled || !st.visible) { console.log('   ⏭️ Cantidad deshabilitada/oculta en una línea -> se omite el rango en ese ítem'); return; }
             await input.scrollIntoViewIfNeeded();
             await input.evaluate(el => el.removeAttribute('readonly'));
-            await input.click();
+            await input.click({ timeout: 6000 });
             await input.fill(String(cantidad));
-            await this.page.keyboard.press('Tab'); // blur -> recalcula precio/escalón
+            await this.page.keyboard.press('Tab');
             await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
             await this.page.waitForTimeout(800);
         };
@@ -139,7 +145,7 @@ class ConfigApplier {
             await this.page.waitForTimeout(1000);
         }
 
-        await this.page.waitForTimeout(1000); 
+        await this.page.waitForTimeout(1000);
         return true;
     }
 
@@ -324,7 +330,7 @@ class ConfigApplier {
                     await this.page.keyboard.type(valor);
                     await this.page.waitForTimeout(400);
                     await this.page.keyboard.press('Enter');
-                } catch (e) { /* si la UI falla, los próximos intentos van por jQuery */ }
+                } catch (e) { }
             } else {
                 await this.page.evaluate((obj) => {
                     const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
@@ -368,12 +374,21 @@ class ConfigApplier {
 
             case 'descuento_global': {
                 try {
-                    // Con "%" (ej. "%5" o "5%") => descuento porcentual (#Descuento).
-                    // Sin "%" (ej. "5") => descuento por monto fijo $ (#ValorDescuento).
                     const esPorcentaje = String(valor).includes('%');
                     const numero = String(valor).replace('%', '').trim();
                     const campoId = esPorcentaje ? '#Descuento' : '#ValorDescuento';
                     console.log(`   Aplicando descuento global: ${numero} ${esPorcentaje ? '(porcentaje)' : '(monto fijo $)'} -> ${campoId}`);
+
+                    const input = this.page.locator(campoId);
+                    if (await input.count() === 0) {
+                        console.log(`   ⏭️ ${this.documento} no tiene el campo ${campoId} -> se omite el descuento global`);
+                        break;
+                    }
+                    const estado = await input.evaluate(el => ({ disabled: el.disabled, visible: !!el.offsetParent }));
+                    if (estado.disabled || !estado.visible) {
+                        console.log(`   ⏭️ El campo ${campoId} está ${estado.disabled ? 'deshabilitado' : 'oculto'} en ${this.documento} -> se omite el descuento global`);
+                        break;
+                    }
 
                     const leerTotales = () => this.page.evaluate(() => {
                         const g = (id) => { const e = document.getElementById(id); return e ? e.value : '(n/a)'; };
@@ -381,10 +396,9 @@ class ConfigApplier {
                     });
                     console.log('   📊 ANTES:   ' + await leerTotales());
 
-                    const input = this.page.locator(campoId);
                     await input.scrollIntoViewIfNeeded();
                     await input.evaluate(el => el.removeAttribute('readonly'));
-                    await input.click();
+                    await input.click({ timeout: 6000 });
                     await input.fill(numero);
                     await this.page.keyboard.press('Tab');
                     await this.page.waitForTimeout(1500);
@@ -421,7 +435,7 @@ class ConfigApplier {
                     console.log(`   ⚠️ No pude aplicar cotización: ${e.message}`);
                 }
                 break;
-                
+
             case 'lista_precios':
                 if (this.documento === 'pedido') {
                     console.log('   ⏭️ Pedido no usa lista de precios — se omite');
@@ -476,6 +490,12 @@ class ConfigApplier {
                 } catch (e) {
                     console.log(`   ⚠️ No pude aplicar alícuota: ${e.message}`);
                 }
+                break;
+            }
+
+            case 'regla_descuento': {
+                console.log(`   ℹ️ Regla de descuento (cliente con la regla: ${valor}). El cambio de cliente y la verificación los maneja el orquestador; acá no se aplica nada.`);
+                aplicada = true;
                 break;
             }
 

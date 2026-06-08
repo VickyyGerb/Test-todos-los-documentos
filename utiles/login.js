@@ -6,9 +6,6 @@ async function loginComoAdmin(page, cuentaID) {
     const adminEmail = process.env.ADMIN_USER;
     const adminPass = process.env.ADMIN_PASS;
 
-    // Validar que CuentaID sea un número. Si viene vacío o con texto (ej. quedó
-    // "cuentaID" en la planilla), el campo "ID de cuenta" de la web se rompe con
-    // NaN. Cortamos antes con un mensaje claro.
     const cuenta = (cuentaID || '').toString().trim();
     if (!/^\d+$/.test(cuenta)) {
         throw new Error(`❌ CuentaID inválido: "${cuentaID}". Tiene que ser un número. Revisá la primera columna (CuentaID) de la planilla.`);
@@ -29,7 +26,7 @@ async function loginComoAdmin(page, cuentaID) {
             await page.getByRole('textbox', { name: 'ID de cuenta' }).fill(cuenta);
             await page.getByRole('button', { name: 'Ingresar' }).click();
 
-            await page.waitForNavigation(5000);
+            await page.waitForNavigation({ timeout: 5000 }).catch(() => {});
             return;
         } catch (e) {
             if (intento === 2) throw e;

@@ -46,8 +46,6 @@ class ProductLoader {
             return 0;
         }
 
-        // Precio con IVA real (sin asumir 21%): lectura compartida, buscando la
-        // línea nueva por su guid.
         const lineas = await this.page.evaluate(leerLineasProducto, this.documento);
         const linea = lineas.find(l => l.guid === info.guid);
         const precio = linea ? linea.total : 0;
@@ -56,9 +54,8 @@ class ProductLoader {
         return precio;
     }
 
-
     async abrirSelectProductoVacio() {
-        await this.page.waitForTimeout(1000); 
+        await this.page.waitForTimeout(1000);
 
         const choice = this.page.locator('.select2-container.productoId .select2-choice').first();
         try {
@@ -200,7 +197,7 @@ class ProductLoader {
 
             const search = this.page.locator('#PlantillasLista_chosen .chosen-search input').first();
             await search.waitFor({ state: 'visible', timeout: 4000 });
-            await search.type(String(nombrePlantilla), { delay: 50 }); // type = dispara el filtro del chosen
+            await search.type(String(nombrePlantilla), { delay: 50 });
             await this.page.waitForTimeout(800);
 
             const opcion = this.page.locator('#PlantillasLista_chosen .chosen-results li.active-result').first();
@@ -223,7 +220,6 @@ class ProductLoader {
         }
         await this.page.waitForTimeout(1500);
     }
-
 
     async cargarAsignacionMultiplePedido(codigoInterno, cantidad = 1) {
         const antes = await this.snapshotGuids();

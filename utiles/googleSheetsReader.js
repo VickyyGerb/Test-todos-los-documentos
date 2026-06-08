@@ -6,27 +6,22 @@ async function leerCasosDePrueba(url) {
     if (!matches) {
         throw new Error('URL de Google Sheets inválida');
     }
-    
+
     const sheetId = matches[1];
 
-    // Tomar el gid de la URL si viene (ej. .../edit#gid=123456 o &gid=123456),
-    // así lee la pestaña que tengas abierta. Si no hay gid, exporta la 1ª hoja
-    // (no forzamos gid=0, que falla con 400 si esa pestaña no existe).
     const gidMatch = url.match(/[#&?]gid=([0-9]+)/);
     const gidParam = gidMatch ? `&gid=${gidMatch[1]}` : '';
     const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`;
 
     console.log('Descargando desde:', csvUrl, gidMatch ? `(gid=${gidMatch[1]})` : '(primera hoja)');
-    
+
     const response = await fetch(csvUrl);
     if (!response.ok) {
         throw new Error(`Error al descargar el CSV: ${response.status}`);
     }
-    
+
     const csvText = await response.text();
 
-    // Parser de CSV que respeta comillas: las celdas con comas (ej. la columna
-    // Configuraciones) no se rompen. split(',') simple no servía.
     const filas = parseCsv(csvText);
     const headers = (filas[0] || []).map(h => h.trim());
 
@@ -42,7 +37,7 @@ async function leerCasosDePrueba(url) {
         for (let j = 0; j < headers.length; j++) {
             row[headers[j]] = (values[j] || '').trim();
         }
-        
+
         console.log('==================================');
         console.log(`📌 FILA ${i}:`);
         console.log('  CuentaID:', row['CuentaID']);
@@ -57,20 +52,20 @@ async function leerCasosDePrueba(url) {
         console.log('  Plantilla_Nombre:', row['Plantilla_Nombre']);
         console.log('  Configuraciones (crudo):', row['Configuraciones']);
         console.log('==================================');
-        
-        const tieneMetodo = row['Probar_Manual'] === 'SI' || 
-                           row['Probar_CodigoBarra'] === 'SI' || 
-                           row['Probar_AsignMultiple'] === 'SI' || 
+
+        const tieneMetodo = row['Probar_Manual'] === 'SI' ||
+                           row['Probar_CodigoBarra'] === 'SI' ||
+                           row['Probar_AsignMultiple'] === 'SI' ||
                            row['Probar_Plantilla'] === 'SI';
-        
+
         if (!tieneMetodo) {
             console.log(`⚠️ Caso sin métodos de carga, omitiendo fila ${i}`);
             continue;
         }
-        
+
         const configuraciones = convertirConfiguraciones(row['Configuraciones'] || '');
         console.log('📋 Configuraciones convertidas:', configuraciones);
-        
+
         casos.push({
             cuentaID: row['CuentaID'] || '',
             documento: (row['Documento'] || '').toLowerCase(),
@@ -89,7 +84,7 @@ async function leerCasosDePrueba(url) {
             configuraciones: configuraciones
         });
     }
-    
+
     console.log(`✅ Procesados ${casos.length} casos de prueba`);
     return casos;
 }
@@ -99,9 +94,6 @@ function convertirConfiguraciones(configString) {
         return {};
     }
 
-    // Separar por coma, pero re-unir al par anterior los pedazos que NO tienen
-    // ':' — porque un valor puede tener coma decimal (ej. "descuento_item: 10,5"
-    // se parte en "descuento_item: 10" y "5", y hay que volver a unirlos).
     const pares = [];
     for (const token of configString.split(',')) {
         if (token.includes(':')) pares.push(token);
@@ -112,9 +104,7 @@ function convertirConfiguraciones(configString) {
     for (const par of pares) {
         const idx = par.indexOf(':');
         if (idx === -1) continue;
-        // La clave se normaliza (sin tildes, minúsculas) para que matchee el switch
-        // del configApplier aunque en el Excel venga "Cotización"/"cotización". El
-        // valor NO se toca (necesita su tilde, ej. "Dólar").
+
         const clave = par.slice(0, idx).replace(/"/g, '').trim()
             .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
         const valor = par.slice(idx + 1).replace(/"/g, '').trim();
@@ -126,8 +116,6 @@ function convertirConfiguraciones(configString) {
     return configs;
 }
 
-// Parser de CSV: respeta comillas dobles (celdas con comas o saltos de línea)
-// y comillas escapadas (""). Devuelve un array de filas (cada fila, array de celdas).
 function parseCsv(text) {
     const filas = [];
     let fila = [];
@@ -138,7 +126,7 @@ function parseCsv(text) {
         const ch = text[i];
         if (entreComillas) {
             if (ch === '"') {
-                if (text[i + 1] === '"') { celda += '"'; i++; } // comilla escapada
+                if (text[i + 1] === '"') { celda += '"'; i++; }
                 else entreComillas = false;
             } else {
                 celda += ch;
@@ -147,7 +135,7 @@ function parseCsv(text) {
             if (ch === '"') entreComillas = true;
             else if (ch === ',') { fila.push(celda); celda = ''; }
             else if (ch === '\n') { fila.push(celda); filas.push(fila); fila = []; celda = ''; }
-            else if (ch === '\r') { /* ignorar CR */ }
+            else if (ch === '\r') {  }
             else celda += ch;
         }
     }

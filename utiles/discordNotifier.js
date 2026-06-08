@@ -12,7 +12,7 @@ function formatearDuracion(ms) {
     return partes.join(' ');
 }
 
-async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, documento, tiposCarga, metodosEsperados, configs, precioUnitario, precioAntes, precioDespues }) {
+async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, documento, tiposCarga, metodosEsperados, configs, precioUnitario, precioAntes, precioDespues, guardado }) {
     const url = process.env.DISCORD_WEBHOOK_URL;
     if (!url) {
         console.log('⚠️ No hay DISCORD_WEBHOOK_URL en .env — no se envía notificación a Discord');
@@ -41,17 +41,24 @@ async function notificarDiscord({ exito, duracionMs, cuentaID, productoID, docum
 
     const hayConfigs = configs && Object.keys(configs).length > 0;
     if (!hayConfigs) {
-        // Sin configuraciones el precio no cambia: un solo campo "Precio".
+
         fields.push({ name: 'Precio', value: String(precioDespues || precioAntes || '-'), inline: false });
     } else {
-        // "Precio antes" en su propia línea; abajo, "precio x producto" (solo si hay
-        // rango de precios) y "precio después" juntos en la misma línea (inline).
+
         fields.push({ name: 'Precio antes de configs', value: String(precioAntes || '-'), inline: false });
         const hayUnitario = precioUnitario && precioUnitario !== '-';
         if (hayUnitario) {
             fields.push({ name: 'Precio x producto (unit.)', value: String(precioUnitario), inline: true });
         }
         fields.push({ name: 'Precio después de configs', value: String(precioDespues || '-'), inline: true });
+    }
+
+    if (guardado && guardado.estado) {
+        let txt;
+        if (guardado.estado === 'ok') txt = `✅ Guardado OK${guardado.mensaje ? ` — ${guardado.mensaje}` : ''}`;
+        else if (guardado.estado === 'error') txt = `❌ Error al guardar${guardado.mensaje ? ` — ${guardado.mensaje}` : ''}`;
+        else txt = `⚠️ No concluyente${guardado.mensaje ? ` — ${guardado.mensaje}` : ''}`;
+        fields.push({ name: 'Guardado', value: txt.slice(0, 1024), inline: false });
     }
 
     const embed = {

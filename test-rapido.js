@@ -10,9 +10,6 @@ require('dotenv').config();
 const fs = require('fs');
 const util = require('util');
 
-// Guardar TODO lo que se imprime en la terminal a un archivo, para poder
-// analizar la corrida completa (cada caso con su banner). Se sobrescribe en
-// cada corrida.
 const logStream = fs.createWriteStream('resultado-corrida.log', { flags: 'w' });
 const _log = console.log.bind(console);
 const _err = console.error.bind(console);
@@ -47,6 +44,8 @@ if (!urlExcel) {
 
         const inicioCaso = Date.now();
         let exito = false;
+        let reglaDescuentoOk = true;
+        let guardado = { intentado: false, estado: 'desconocido', mensaje: '' };
         let tiposCarga = [];
         let configsAplicadas = {};
         let precioAntes = '-';
@@ -55,7 +54,6 @@ if (!urlExcel) {
         const nombreMetodo = { manual: 'Manual', codigoBarra: 'Código de barra', asignMultiple: 'Asignación múltiple', plantilla: 'Plantilla' };
         const fmtPrecios = (arr) => arr.length ? [...new Set(arr)].map(n => '$' + Number(n).toLocaleString('es-AR')).join(', ') : '-';
 
-        // Métodos que se ESPERABA correr (los marcados con SI y con el dato necesario).
         const metodosEsperados = [
             m.manual && caso.producto.codigoInterno,
             m.codigoBarra && caso.producto.codigoBarra,
@@ -63,30 +61,27 @@ if (!urlExcel) {
             m.plantilla && caso.plantillaNombre,
         ].filter(Boolean).length;
 
-        // Contexto propio por caso: sesión limpia (sin arrastrar el login del anterior).
-        // viewport null = usa el tamaño real de la ventana (maximizada).
         const context = await browser.newContext({ viewport: null });
         const page = await context.newPage();
 
         try {
             await loginComoAdmin(page, caso.cuentaID);
             console.log(`✅ Login exitoso en cuenta ${caso.cuentaID}`);
-            
-            const documentsPage = new DocumentsPage(page);
+
+            const documentsPage = new DocumentsPage(page, caso.documento);
             await documentsPage.navegar(caso.documento);
             console.log(`✅ Navegó a ${caso.documento}`);
-            
+
             if (caso.clienteID && caso.clienteID !== '') {
                 await documentsPage.seleccionarCliente(caso.clienteID);
                 console.log(`✅ Cliente ${caso.clienteID} seleccionado`);
             }
-            
+
             const productLoader = new ProductLoader(page, caso.documento);
             const preciosAntes = [];
-            
-            // ==================== 1. CARGAR PRODUCTOS SIN CONFIGURACIONES ====================
+
             console.log('\n📦 Cargando productos SIN configuraciones:');
-            
+
             if (caso.probarMetodos.manual && caso.producto.codigoInterno) {
                 try {
                     console.log('📦 Probando carga manual...');
@@ -151,12 +146,33 @@ if (!urlExcel) {
                 await page.waitForTimeout(500);
             }
 
-            // Tipos de carga que REALMENTE cargaron en este documento (los que
-            // dieron precio). Los que no aplican/no andan no se incluyen.
             tiposCarga = preciosAntes.map(p => nombreMetodo[p.metodo] || p.metodo);
             precioAntes = fmtPrecios(preciosAntes.map(p => p.precio));
 
-            // ==================== 2. APLICAR CONFIGURACIONES ====================
+            const reglaKey = Object.keys(caso.configuraciones || {}).find(k =>
+                /^reglas?_(de_)?descuentos?$/.test(String(k).replace(/\s+/g, '_')));
+            if (reglaKey) {
+                const raw = String(caso.configuraciones[reglaKey] || '').trim();
+                const m = raw.match(/^\(\s*(cliente|zona|vendedor)\s*\)\s*(.+)$/i);
+                const tipo = m ? m[1].toLowerCase() : 'cliente';
+                const dato = m ? m[2].trim() : raw;
+                if (!dato || /^(cliente|zona|vendedor)$/i.test(dato)) {
+                    console.log(`\n🏷️ Regla de descuento: falta el dato. Usá "regla_descuentos: (cliente) 0002" o "regla_descuentos: (vendedor) Fede". Se omite el cambio.`);
+                } else {
+                    console.log(`\n🏷️ Regla de descuento (${tipo}): cambiando a "${dato}"...`);
+                    try {
+                        page.once('dialog', d => d.accept().catch(() => {}));
+                        if (tipo === 'vendedor') await documentsPage.seleccionarVendedor(dato);
+                        else await documentsPage.seleccionarCliente(dato);
+                        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+                        await page.waitForTimeout(2500);
+                        console.log(`   ✅ Cambiado (${tipo}: ${dato}); Fidel recalcula con la regla.`);
+                    } catch (e) {
+                        console.log(`   ❌ No pude cambiar ${tipo} a "${dato}": ${e.message}`);
+                    }
+                }
+            }
+
             if (caso.configuraciones && Object.keys(caso.configuraciones).length > 0) {
                 console.log('\n⚙️ Aplicando configuraciones...');
                 const configApplier = new ConfigApplier(page, caso.documento);
@@ -166,38 +182,27 @@ if (!urlExcel) {
             } else {
                 console.log('⚠️ No hay configuraciones para aplicar');
             }
-            
-            // ==================== 3. LEER PRECIOS DESPUÉS DE CONFIGURACIONES ====================
+
         console.log('\n💰 Leyendo precios DESPUÉS de configuraciones:');
 
         await page.waitForTimeout(3000);
 
-        // Lectura única y agnóstica al documento (IVA real, sin asumir 21%).
-        // De acá salen TANTO el detalle por línea como los precios "después",
-        // así no pueden contradecirse (era el bug en presupuesto: 12069.75 vs 9975).
         const lineasDetalle = await page.evaluate(leerLineasProducto, caso.documento);
         const preciosDespues = lineasDetalle.map(l => l.total).filter(p => p > 0);
 
         console.log(`   Precios DESPUÉS: ${preciosDespues.join(', ')}`);
         console.log(`   Cantidad de precios: ${preciosDespues.length}`);
 
-        // Detalle por línea para comparar los 4 campos de la grilla entre cargas:
-        // Precio (unitario) / Cantidad / Bonificación / Total con IVA. Como las
-        // líneas son el mismo producto con la misma cantidad, deben coincidir.
         console.log('\n📊 DETALLE POR LÍNEA (Precio / Cantidad / Bonif. / Total):');
         lineasDetalle.forEach((l, i) =>
             console.log(`   Línea ${i + 1}: precio=${l.precio}  cant=${l.cantidad}  bonif=${l.bonificacion}  total=${l.total}  [${l.fuente}]`));
 
-        // Precio por producto (unitario) para Discord: SOLO si el caso usa rango
-        // de precios (si no, no aporta y no se muestra el campo).
         const tieneRango = Object.keys(caso.configuraciones || {}).some(k =>
             k.replace(/\s+/g, '_').replace('rango_de_precios', 'rango_precios') === 'rango_precios');
         if (tieneRango) {
             precioUnitario = fmtPrecios(lineasDetalle.map(l => l.precio).filter(p => p > 0));
         }
 
-        // Cada campo debe coincidir entre todas las líneas (mismas cargas = mismo
-        // producto y misma cantidad). Si alguno no coincide, el caso falla.
         const camposComparar = [
             ['precio', 'Precio (unitario)'],
             ['cantidad', 'Cantidad'],
@@ -218,7 +223,45 @@ if (!urlExcel) {
             console.log(`   ⚠️ "Precio" vino 0: quizá el campo no se llama ".Precio". Campos de la línea: ${lineasDetalle[0].campos.join(', ')}`);
         }
 
-            // ==================== 4. VERIFICACIONES ====================
+        const tieneReglaDescuento = Object.keys(caso.configuraciones || {}).some(k =>
+            /^reglas?_(de_)?descuentos?$/.test(String(k).replace(/\s+/g, '_')));
+        if (tieneReglaDescuento && lineasDetalle.length) {
+            const bonifs = [...new Set(lineasDetalle.map(l => l.bonificacion))];
+
+            const r2 = (n) => Math.round(n * 100) / 100;
+            const baseSet = [...new Set(preciosAntes.map(p => p.precio))];
+            const descSet = [...new Set(lineasDetalle.map(l => l.cantidad > 0 ? r2(l.total / l.cantidad) : l.total))];
+            console.log('\n🏷️ REGLA DE DESCUENTO (verificación del efecto):');
+
+            let bonifOk = false;
+            if (bonifs.length === 1) {
+                const b = bonifs[0];
+                bonifOk = b > 0;
+                console.log(`   ${bonifOk ? '✅' : '⚠️'} Bonificación uniforme en las ${lineasDetalle.length} carga(s): ${b}%`);
+                if (!bonifOk) console.log('   ⚠️ La bonificación quedó en 0: el cliente con la regla quizá no la tiene, o por zona/vendedor no se disparó en este documento.');
+            } else {
+                console.log(`   ❌ La bonificación NO es igual entre cargas: ${bonifs.join(', ')}% → la regla no se aplicó pareja.`);
+            }
+
+            let bajoOk = false;
+            if (baseSet.length === 1 && descSet.length === 1) {
+                const base = baseSet[0], desc = descSet[0];
+                if (desc < base) {
+                    const pct = base > 0 ? Math.round((1 - desc / base) * 1000) / 10 : 0;
+                    bajoOk = true;
+                    console.log(`   ✅ El precio por unidad BAJÓ con la regla: base $${base} → con descuento $${desc} (~${pct}% menos).`);
+                } else if (desc === base) {
+                    console.log(`   ❌ El precio por unidad NO cambió (base $${base} = con regla $${desc}): la regla no tuvo efecto.`);
+                } else {
+                    console.log(`   ❌ El precio por unidad SUBIÓ (base $${base} → $${desc}): algo está mal, revisar la regla.`);
+                }
+            } else {
+                console.log(`   ⚠️ No pude comparar por unidad (base: ${baseSet.join(', ') || '-'} / con regla: ${descSet.join(', ') || '-'}).`);
+            }
+
+            reglaDescuentoOk = bonifOk && bajoOk;
+        }
+
             console.log('\n📊 VERIFICACIÓN ANTES de configuraciones:');
             const preciosUnicosAntes = [...new Set(preciosAntes.map(p => p.precio))];
             if (preciosUnicosAntes.length === 1) {
@@ -227,11 +270,11 @@ if (!urlExcel) {
                 console.log(`❌ ANTES: Los precios NO coinciden`);
                 preciosAntes.forEach(p => console.log(`   ${p.metodo}: ${p.precio}`));
             }
-            
+
             console.log('\n📊 VERIFICACIÓN DESPUÉS de configuraciones:');
             const preciosUnicosDespues = [...new Set(preciosDespues)];
-            // Éxito = hay precios, coinciden, y los 4 campos por línea son consistentes.
-            exito = preciosDespues.length > 0 && preciosUnicosDespues.length === 1 && camposConsistentes;
+
+            exito = preciosDespues.length > 0 && preciosUnicosDespues.length === 1 && camposConsistentes && reglaDescuentoOk;
             precioDespues = fmtPrecios(preciosDespues);
             if (preciosUnicosDespues.length === 1) {
                 console.log(`✅ DESPUÉS: Todos los productos tienen el mismo precio: ${preciosUnicosDespues[0]}`);
@@ -239,9 +282,14 @@ if (!urlExcel) {
                 console.log(`❌ DESPUÉS: Los precios NO coinciden`);
                 preciosDespues.forEach((p, i) => console.log(`   Producto ${i+1}: ${p}`));
             }
-            
+
+            console.log('\n💾 Guardando el documento...');
+            guardado = await documentsPage.guardar({ confirmar: true });
+            const iconoGuardado = guardado.estado === 'ok' ? '✅ OK' : guardado.estado === 'error' ? '❌ Error (Fidel)' : '⚠️ no concluyente';
+            console.log(`   Resultado del guardado: ${iconoGuardado}${guardado.mensaje ? ' -> ' + guardado.mensaje : ''}`);
+
             await page.waitForTimeout(2000);
-            
+
         } catch (error) {
             console.error(`❌ Error en caso: ${error.message}`);
         }
@@ -261,6 +309,7 @@ if (!urlExcel) {
             precioUnitario,
             precioAntes,
             precioDespues,
+            guardado,
         });
     }
 
