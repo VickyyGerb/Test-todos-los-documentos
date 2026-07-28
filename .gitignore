@@ -8,3 +8,6 @@ debug-*.txt
 resultado-corrida.log
 CLAUDE.md
 ESTADO-Y-PROXIMOS-PASOS.txt
+.claude/
+casos-prueba-compra.tsv
+casos-todos-los-docs.tsv

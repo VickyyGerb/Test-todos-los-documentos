@@ -6,11 +6,18 @@ class DocumentsPage {
 
     async navegar(tipoDocumento) {
         const urls = {
+            // Ventas
             factura: "https://dev.fidel.com.ar/Sistema/Venta/Crear",
             presupuesto: "https://dev.fidel.com.ar/Sistema/PresupuestoVenta/Crear",
             venta_unificada: "https://dev.fidel.com.ar/Sistema/ComprobanteRapido/Crear",
             pedido: "https://dev.fidel.com.ar/Sistema/Pedido/Crear",
             remito: "https://dev.fidel.com.ar/Sistema/Remito/Crear",
+            orden: "https://dev.sistema.fidel.com.ar/servicio-orden/crear",
+            preorden: "https://dev.sistema.fidel.com.ar/servicio-preorden/crear",
+            // Compra
+            factura_compra: "https://dev.fidel.com.ar/Sistema/Compra/Crear",
+            presupuesto_compra: "https://dev.sistema.fidel.com.ar/compra/presupuesto/crear",
+            orden_compra: "https://dev.sistema.fidel.com.ar/compra/orden-compra/crear",
         };
         const url = urls[tipoDocumento];
         if (!url) throw new Error(`Documento desconocido: ${tipoDocumento}`);
@@ -31,7 +38,305 @@ class DocumentsPage {
         }
     }
 
+    async seleccionarProveedor(proveedorID) {
+        // Documentos React (dev.sistema.fidel) — el proveedor es el React Select más arriba en la página (menor Y)
+        if (['presupuesto_compra', 'orden_compra'].includes(this.documento)) {
+            const proveedorInputId = await this.page.evaluate(() => {
+                const inputs = Array.from(document.querySelectorAll('input[id^="react-select-"][id$="-input"]'))
+                    .filter(inp => inp.offsetParent !== null);
+                inputs.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+                return inputs[0]?.id || null;
+            });
+            if (proveedorInputId && await this._seleccionarReactSelect(proveedorInputId, proveedorID)) {
+                console.log(`   ✅ Proveedor ${proveedorID} seleccionado (React Select "${proveedorInputId}")`);
+                return;
+            }
+            console.log(`   ⚠️ No pude seleccionar el proveedor en ${this.documento} — continúo de todas formas`);
+            return;
+        }
+        // factura_compra: Proveedor = Select2 #s2id_ProveedorId
+        if (this.documento === 'factura_compra') {
+            try {
+                await this.page.locator('#s2id_ProveedorId .select2-choice').click();
+                await this.page.waitForTimeout(500);
+                const enfocado = await this.page.evaluate(() => {
+                    const inp = Array.from(document.querySelectorAll('input.select2-input')).find(i => i.offsetParent !== null);
+                    if (!inp) return false;
+                    inp.focus(); inp.value = ''; return true;
+                });
+                if (!enfocado) console.log(`   ⚠️ Select2 proveedor sin buscador visible`);
+                await this.page.keyboard.type(proveedorID, { delay: 80 });
+                await this.page.waitForTimeout(2500);
+                const resultado = this.page.locator('.select2-results li.select2-result-selectable').first();
+                try {
+                    await resultado.waitFor({ state: 'visible', timeout: 5000 });
+                    await resultado.click();
+                } catch {
+                    await this.page.keyboard.press('Enter');
+                }
+                await this.page.waitForTimeout(800);
+                // Verificar que el valor quedó realmente seleccionado
+                const textoElegido = await this.page.evaluate(() => {
+                    const el = document.querySelector('#s2id_ProveedorId .select2-chosen');
+                    return el ? el.textContent.trim() : null;
+                });
+                if (textoElegido && textoElegido !== 'Seleccione...' && textoElegido !== '') {
+                    console.log(`   ✅ Proveedor seleccionado: "${textoElegido}"`);
+                } else {
+                    console.log(`   ⚠️ Proveedor puede no haber quedado (texto actual: "${textoElegido || 'vacío'}") — verificar manualmente`);
+                }
+            } catch (e) {
+                console.log(`   ⚠️ No pude seleccionar el proveedor "${proveedorID}": ${e.message}`);
+            } finally {
+                // Si el dropdown de Select2 quedó abierto (ej: no encontró resultados), el
+                // #select2-drop-mask tapa toda la página y bloquea cualquier click posterior
+                // (tipo de factura, número, guardar en dólar, carga de producto).
+                if (await this.page.locator('#select2-drop-mask').count()) {
+                    await this.page.keyboard.press('Escape').catch(() => {});
+                    await this.page.evaluate(() => document.querySelectorAll('#select2-drop-mask, .select2-drop-mask').forEach(m => m.remove()));
+                    await this.page.waitForTimeout(300);
+                }
+            }
+            return;
+        }
+        const candidatos = ['Proveedor', 'Nombre', 'Razón Social', 'Razon Social', 'Cliente'];
+        for (const label of candidatos) {
+            try {
+                await this._seleccionarSelect2PorLabel(label, proveedorID);
+                console.log(`   ✅ Proveedor ${proveedorID} seleccionado (label: "${label}")`);
+                return;
+            } catch {}
+        }
+        if (await this._seleccionarPrimerSelect2Libre(proveedorID)) {
+            console.log(`   ✅ Proveedor ${proveedorID} seleccionado (primer Select2 libre)`);
+            return;
+        }
+        console.log(`   ⚠️ No pude seleccionar el proveedor "${proveedorID}" — continúo de todas formas`);
+    }
+
+    async _seleccionarReactSelect(inputId, valor) {
+        const input = this.page.locator(`#${inputId}`);
+        if (await input.count() === 0) return false;
+        await input.click();
+        // Tipear letra por letra (como cargarManualReact) — .fill() setea el valor de una
+        // sola vez y el AsyncPaginate de React puede no disparar su onInputChange interno.
+        await input.pressSequentially(String(valor), { delay: 80 });
+        await this.page.waitForTimeout(2000);
+        const opciones = await this.page.evaluate(() =>
+            Array.from(document.querySelectorAll('[class*="option"]'))
+                .map(el => el.textContent.trim().slice(0, 60))
+                .filter(Boolean));
+        console.log(`   🔎 React Select "${inputId}" — opciones tras tipear "${valor}": ${JSON.stringify(opciones)}`);
+        // Escopar al menú del propio combo (class "selectproduct__menu") — un selector
+        // global de "option" puede matchear elementos ajenos de la página (ej: botones
+        // de card con clase "card-options").
+        const opcion = this.page.locator('.selectproduct__menu [class*="option"]:not([class*="notice"]):not([class*="no-options"])').first();
+        try {
+            await opcion.waitFor({ state: 'visible', timeout: 4000 });
+            await opcion.click();
+            await this.page.waitForTimeout(500);
+            return true;
+        } catch (e) {
+            console.log(`   ⚠️ React Select "${inputId}": no pude clickear la opción (${e.message})`);
+            await this.page.keyboard.press('Escape').catch(() => {});
+            return false;
+        }
+    }
+
+    async seleccionarCuentaDoc(valor) {
+        // factura_compra: intenta Chosen conocido, luego labels, luego avanza igual
+        if (this.documento === 'factura_compra') {
+            // Estrategia 1: Chosen #CertificadoCuentaNombreId_chosen
+            const chosen = this.page.locator('#CertificadoCuentaNombreId_chosen .chosen-single');
+            if (await chosen.count() > 0) {
+                try {
+                    await chosen.waitFor({ state: 'visible', timeout: 2000 });
+                    await chosen.click();
+                    await this.page.waitForTimeout(400);
+                    await this.page.keyboard.type(valor);
+                    await this.page.waitForTimeout(1500);
+                    const opcion = this.page.locator('.chosen-results li.active-result').first();
+                    await opcion.waitFor({ state: 'visible', timeout: 4000 });
+                    await opcion.click();
+                    await this.page.waitForTimeout(500);
+                    console.log(`   ✅ Cuenta "${valor}" seleccionada`);
+                    return;
+                } catch (e) {
+                    console.log(`   ⚠️ Chosen de cuenta falló: ${e.message}`);
+                }
+            }
+            // Estrategia 2: buscar por label
+            for (const label of ['Cuenta', 'Certificado Cuenta', 'Certificado']) {
+                try {
+                    await this._seleccionarSelect2PorLabel(label, valor);
+                    console.log(`   ✅ Cuenta "${valor}" seleccionada (label: "${label}")`);
+                    return;
+                } catch {}
+            }
+            console.log(`   ⚠️ No encontré campo de cuenta — continúo con proveedor`);
+            return;
+        }
+        const candidatos = ['Cuenta', 'Certificado', 'Cliente', 'Razón Social', 'Razon Social'];
+        for (const label of candidatos) {
+            try {
+                await this._seleccionarSelect2PorLabel(label, valor);
+                console.log(`   ✅ Cuenta "${valor}" seleccionada (label: "${label}")`);
+                return;
+            } catch {}
+        }
+        console.log(`   ⚠️ No pude seleccionar la cuenta "${valor}" — continúo de todas formas`);
+    }
+
+    async _seleccionarPrimerSelect2Libre(valor) {
+        // Encontrar el índice del primer .select2-choice visible con texto vacío
+        const idx = await this.page.evaluate(() => {
+            const choices = Array.from(document.querySelectorAll('.select2-choice'));
+            for (let i = 0; i < choices.length; i++) {
+                const c = choices[i];
+                if (!c.offsetParent) continue;
+                const txt = (c.querySelector('.select2-chosen')?.textContent || '').trim();
+                if (txt === 'Seleccione...' || txt === 'Seleccionar...' || txt === '') return i;
+            }
+            return -1;
+        });
+        if (idx < 0) return false;
+
+        // Click real de Playwright para que Select2 abra el dropdown correctamente
+        await this.page.locator('.select2-choice').nth(idx).click();
+        await this.page.waitForTimeout(500);
+
+        // Buscar input de búsqueda por offsetParent (igual que seleccionarCliente)
+        const enfocado = await this.page.evaluate(() => {
+            const inp = Array.from(document.querySelectorAll('input.select2-input')).find(i => i.offsetParent !== null);
+            if (!inp) return false;
+            inp.focus(); inp.value = ''; return true;
+        });
+        if (!enfocado) {
+            console.log(`   ⚠️ Select2 sin buscador visible, tecleando globalmente`);
+        }
+        await this.page.keyboard.type(valor, { delay: 80 });
+
+        await this.page.waitForTimeout(2500);
+        await this.page.keyboard.press('Enter');
+        await this.page.waitForTimeout(800);
+        if (await this.page.locator('#select2-drop-mask').count()) {
+            await this.page.keyboard.press('Escape').catch(() => {});
+            await this.page.evaluate(() => document.querySelectorAll('#select2-drop-mask, .select2-drop-mask').forEach(m => m.remove()));
+            await this.page.waitForTimeout(300);
+        }
+        return true;
+    }
+
+    async _seleccionarSelect2PorSelectId(selectId, valor) {
+        // Select2 v3 genera un container con id="s2id_{selectId}"
+        const choiceLoc = this.page.locator(`#s2id_${selectId} .select2-choice`);
+        if (await choiceLoc.count()) {
+            await choiceLoc.click();
+        } else {
+            // Fallback: buscar el .select2-container hermano o padre del select
+            const clicado = await this.page.evaluate((id) => {
+                const select = document.getElementById(id);
+                if (!select) return false;
+                const container = select.nextElementSibling?.classList?.contains('select2-container')
+                    ? select.nextElementSibling
+                    : select.parentElement?.querySelector('.select2-container');
+                if (container) {
+                    const choice = container.querySelector('.select2-choice');
+                    if (choice) { choice.click(); return true; }
+                }
+                return false;
+            }, selectId);
+            if (!clicado) throw new Error(`No encontré select#${selectId} con Select2`);
+        }
+
+        await this.page.waitForTimeout(500);
+        const enfocado = await this.page.evaluate(() => {
+            const inp = Array.from(document.querySelectorAll('input.select2-input')).find(i => i.offsetParent !== null);
+            if (!inp) return false;
+            inp.focus(); inp.value = ''; return true;
+        });
+        if (!enfocado) console.log(`   ⚠️ Select2 #${selectId} sin buscador visible, tecleando globalmente`);
+        await this.page.keyboard.type(valor, { delay: 80 });
+        await this.page.waitForTimeout(2500);
+        await this.page.keyboard.press('Enter');
+        await this.page.waitForTimeout(800);
+        if (await this.page.locator('#select2-drop-mask').count()) {
+            await this.page.keyboard.press('Escape').catch(() => {});
+            await this.page.evaluate(() => document.querySelectorAll('#select2-drop-mask, .select2-drop-mask').forEach(m => m.remove()));
+            await this.page.waitForTimeout(300);
+        }
+    }
+
+    async _seleccionarSelect2PorLabel(labelTexto, valor) {
+        const clicado = await this.page.evaluate((txt) => {
+            const norm = t => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+            for (const label of document.querySelectorAll('label')) {
+                if (!norm(label.textContent).includes(norm(txt))) continue;
+
+                // Estrategia 1: label[for] → select → .select2-container
+                const forAttr = label.getAttribute('for');
+                if (forAttr) {
+                    const select = document.getElementById(forAttr);
+                    if (select && select.tagName === 'SELECT') {
+                        const container = select.parentElement?.querySelector('.select2-container');
+                        if (container) {
+                            const chosen = container.querySelector('.select2-choice, .select2-chosen');
+                            if (chosen) { (chosen.closest('a') || chosen).click(); return true; }
+                        }
+                    }
+                }
+
+                // Estrategia 2: .select2-container más cercano al label (sin atributo for)
+                const scope = label.closest('div, td, .form-group, .field, li, .row, .col') || label.parentElement;
+                if (scope) {
+                    const container = scope.querySelector('.select2-container');
+                    if (container) {
+                        const chosen = container.querySelector('.select2-choice, .select2-chosen');
+                        if (chosen) { (chosen.closest('a') || chosen).click(); return true; }
+                    }
+                }
+            }
+            return false;
+        }, labelTexto);
+
+        if (!clicado) throw new Error(`No encontré el campo "${labelTexto}" en la página`);
+        await this.page.waitForTimeout(800);
+
+        const enfocado = await this.page.evaluate(() => {
+            const inp = Array.from(document.querySelectorAll('input.select2-input')).find(i => i.offsetParent !== null);
+            if (!inp) return false;
+            inp.focus(); inp.value = ''; return true;
+        });
+        if (!enfocado) console.log(`   ⚠️ No vi el buscador del Select2 de "${labelTexto}"`);
+        await this.page.keyboard.type(valor, { delay: 80 });
+        await this.page.waitForTimeout(2500);
+        await this.page.keyboard.press('Enter');
+        await this.page.waitForTimeout(800);
+
+        if (await this.page.locator('#select2-drop-mask').count()) {
+            await this.page.keyboard.press('Escape').catch(() => {});
+            await this.page.evaluate(() => document.querySelectorAll('#select2-drop-mask, .select2-drop-mask').forEach(m => m.remove()));
+            await this.page.waitForTimeout(300);
+        }
+    }
+
     async seleccionarCliente(clienteID) {
+        // orden/preorden: páginas React (dev.sistema.fidel) — el cliente es el React Select
+        // más arriba en la página (menor Y), mismo patrón que seleccionarProveedor.
+        if (['orden', 'preorden'].includes(this.documento)) {
+            const clienteInputId = await this.page.evaluate(() => {
+                const inputs = Array.from(document.querySelectorAll('input[id^="react-select-"][id$="-input"]'))
+                    .filter(inp => inp.offsetParent !== null);
+                inputs.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+                return inputs[0]?.id || null;
+            });
+            if (clienteInputId && await this._seleccionarReactSelect(clienteInputId, clienteID)) {
+                console.log(`   ✅ Cliente ${clienteID} seleccionado (React Select "${clienteInputId}")`);
+                return;
+            }
+            console.log(`   ⚠️ No pude seleccionar el cliente en ${this.documento} — continúo de todas formas`);
+            return;
+        }
 
         await this.page.click('#select2-chosen-1');
         await this.page.waitForTimeout(800);
@@ -129,6 +434,11 @@ class DocumentsPage {
             pedido: ['Guardar y Salir'],
             venta_unificada: ['Facturar'],
             remito: ['Guardar'],
+            orden: ['Guardar y Salir'],
+            preorden: ['Guardar y Salir'],
+            factura_compra: ['Guardar y Salir'],
+            presupuesto_compra: ['Guardar y Salir'],
+            orden_compra: ['Guardar y Salir'],
         };
         const textos = [...new Set([...(accionesPorDoc[this.documento] || []), 'Guardar y Salir', 'Facturar', 'Presupuestar', 'Guardar', 'Confirmar'])];
         this.page.once('dialog', d => d.accept().catch(() => {}));

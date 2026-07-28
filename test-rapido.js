@@ -8,13 +8,30 @@ const { notificarDiscord } = require('./utiles/discordNotifier');
 const { leerLineasProducto } = require('./utiles/lecturaPrecios');
 require('dotenv').config();
 const fs = require('fs');
-const util = require('util');
 
 const logStream = fs.createWriteStream('resultado-corrida.log', { flags: 'w' });
-const _log = console.log.bind(console);
-const _err = console.error.bind(console);
-console.log = (...a) => { _log(...a); logStream.write(util.format(...a) + '\n'); };
-console.error = (...a) => { _err(...a); logStream.write(util.format(...a) + '\n'); };
+// console.log/error/warn ya escriben a process.stdout/stderr — alcanza con interceptar el
+// write de bajo nivel. Interceptar además console.log (que a su vez llama a stdout.write)
+// duplicaba cada línea en el archivo de log.
+const _stdoutWrite = process.stdout.write.bind(process.stdout);
+const _stderrWrite = process.stderr.write.bind(process.stderr);
+process.stdout.write = (chunk, ...rest) => { _stdoutWrite(chunk, ...rest); logStream.write(chunk); return true; };
+process.stderr.write = (chunk, ...rest) => { _stderrWrite(chunk, ...rest); logStream.write(chunk); return true; };
+
+// Configs que van DESPUÉS de cuenta/proveedor pero ANTES de cargar producto
+function esConfigPreProducto(configKey, documento) {
+    const k = String(configKey || '').replace(/\s+/g, '_').toLowerCase();
+    if (documento === 'factura_compra') {
+        return /^tipo/.test(k) || /^n[uú]mero/.test(k);
+    }
+    if (documento === 'presupuesto_compra') {
+        return /^n[uú]mero/.test(k) || /^fecha/.test(k);
+    }
+    if (documento === 'orden_compra') {
+        return /^transporte/.test(k) || /^fecha.?entrega/.test(k);
+    }
+    return false;
+}
 
 const urlExcel = process.argv[2];
 
@@ -29,7 +46,7 @@ if (!urlExcel) {
     const casos = await leerCasosDePrueba(urlExcel);
     console.log(`✅ Se encontraron ${casos.length} casos`);
 
-    const browser = await chromium.launch({ headless: false, slowMo: 80, args: ['--start-maximized'] });
+    let browser = await chromium.launch({ headless: false, slowMo: 80, args: ['--start-maximized'] });
 
     let numeroCaso = 0;
     for (const caso of casos) {
@@ -61,8 +78,24 @@ if (!urlExcel) {
             m.plantilla && caso.plantillaNombre,
         ].filter(Boolean).length;
 
-        const context = await browser.newContext({ viewport: null });
-        const page = await context.newPage();
+        if (!browser.isConnected()) {
+            console.log('   ⚠️ Browser cerrado, relanzando...');
+            browser = await chromium.launch({ headless: false, slowMo: 80, args: ['--start-maximized'] });
+        }
+        let context, page;
+        try {
+            context = await browser.newContext({ viewport: null });
+            page = await context.newPage();
+        } catch (e) {
+            // isConnected() puede no reflejar a tiempo un browser recién crasheado/cerrado
+            // (ver bug de la corrida 2026-07-24: casos en cascada con "context or browser has
+            // been closed" sin que se imprimiera el mensaje de arriba). Si falla la creación
+            // de la página, forzamos el relanzamiento igual y reintentamos una vez.
+            console.log(`   ⚠️ No pude abrir página nueva (${e.message}), relanzando browser...`);
+            browser = await chromium.launch({ headless: false, slowMo: 80, args: ['--start-maximized'] });
+            context = await browser.newContext({ viewport: null });
+            page = await context.newPage();
+        }
 
         try {
             await loginComoAdmin(page, caso.cuentaID);
@@ -72,15 +105,36 @@ if (!urlExcel) {
             await documentsPage.navegar(caso.documento);
             console.log(`✅ Navegó a ${caso.documento}`);
 
-            if (caso.clienteID && caso.clienteID !== '') {
+            const productLoader = new ProductLoader(page, caso.documento);
+            const configApplier = new ConfigApplier(page, caso.documento);
+            const preciosAntes = [];
+
+            // 1. Seleccionar cuenta/proveedor/cliente
+            const esCompraConProveedor = ['factura_compra', 'presupuesto_compra', 'orden_compra'].includes(caso.documento);
+            if (esCompraConProveedor) {
+                if (caso.documento === 'factura_compra' && caso.cuentaDoc) {
+                    await documentsPage.seleccionarCuentaDoc(caso.cuentaDoc);
+                }
+                if (caso.clienteID) {
+                    await documentsPage.seleccionarProveedor(caso.clienteID);
+                }
+            } else if (caso.clienteID && caso.clienteID !== '') {
                 await documentsPage.seleccionarCliente(caso.clienteID);
                 console.log(`✅ Cliente ${caso.clienteID} seleccionado`);
             }
 
-            const productLoader = new ProductLoader(page, caso.documento);
-            const preciosAntes = [];
+            // 2. Configs pre-producto (después de cuenta/proveedor, antes del producto)
+            const configsPre = Object.fromEntries(
+                Object.entries(caso.configuraciones || {}).filter(([k]) => esConfigPreProducto(k, caso.documento))
+            );
+            if (Object.keys(configsPre).length > 0) {
+                console.log('\n⚙️ Aplicando configuraciones PRE-producto...');
+                const aplicadasPre = await configApplier.aplicar(configsPre, caso.producto.codigoInterno);
+                configsAplicadas = { ...configsAplicadas, ...aplicadasPre };
+                await page.waitForTimeout(1000);
+            }
 
-            console.log('\n📦 Cargando productos SIN configuraciones:');
+            console.log('\n📦 Cargando productos:');
 
             if (caso.probarMetodos.manual && caso.producto.codigoInterno) {
                 try {
@@ -173,13 +227,16 @@ if (!urlExcel) {
                 }
             }
 
-            if (caso.configuraciones && Object.keys(caso.configuraciones).length > 0) {
+            const configsPost = Object.fromEntries(
+                Object.entries(caso.configuraciones || {}).filter(([k]) => !esConfigPreProducto(k, caso.documento))
+            );
+            if (Object.keys(configsPost).length > 0) {
                 console.log('\n⚙️ Aplicando configuraciones...');
-                const configApplier = new ConfigApplier(page, caso.documento);
-                configsAplicadas = await configApplier.aplicar(caso.configuraciones, caso.producto.codigoInterno);
+                const aplicadasPost = await configApplier.aplicar(configsPost, caso.producto.codigoInterno);
+                configsAplicadas = { ...configsAplicadas, ...aplicadasPost };
                 console.log(`✅ Configuraciones aplicadas`);
                 await page.waitForTimeout(2000);
-            } else {
+            } else if (Object.keys(configsPre).length === 0) {
                 console.log('⚠️ No hay configuraciones para aplicar');
             }
 
@@ -283,10 +340,11 @@ if (!urlExcel) {
                 preciosDespues.forEach((p, i) => console.log(`   Producto ${i+1}: ${p}`));
             }
 
-            console.log('\n💾 Guardando el documento...');
-            guardado = await documentsPage.guardar({ confirmar: true });
-            const iconoGuardado = guardado.estado === 'ok' ? '✅ OK' : guardado.estado === 'error' ? '❌ Error (Fidel)' : '⚠️ no concluyente';
-            console.log(`   Resultado del guardado: ${iconoGuardado}${guardado.mensaje ? ' -> ' + guardado.mensaje : ''}`);
+            // GUARDAR DESACTIVADO TEMPORALMENTE (para pruebas sin dejar registros)
+            // console.log('\n💾 Guardando el documento...');
+            // guardado = await documentsPage.guardar({ confirmar: true });
+            // const iconoGuardado = guardado.estado === 'ok' ? '✅ OK' : guardado.estado === 'error' ? '❌ Error (Fidel)' : '⚠️ no concluyente';
+            // console.log(`   Resultado del guardado: ${iconoGuardado}${guardado.mensaje ? ' -> ' + guardado.mensaje : ''}`);
 
             await page.waitForTimeout(2000);
 
@@ -294,7 +352,7 @@ if (!urlExcel) {
             console.error(`❌ Error en caso: ${error.message}`);
         }
 
-        await context.close();
+        await context.close().catch(() => {});
 
         const duracionMs = Date.now() - inicioCaso;
         await notificarDiscord({

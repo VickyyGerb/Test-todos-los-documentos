@@ -50,6 +50,7 @@ async function leerCasosDePrueba(url) {
         console.log('  Probar_AsignMultiple:', row['Probar_AsignMultiple']);
         console.log('  Probar_Plantilla:', row['Probar_Plantilla']);
         console.log('  Plantilla_Nombre:', row['Plantilla_Nombre']);
+        console.log('  CuentaDoc:', row['CuentaDoc']);
         console.log('  Configuraciones (crudo):', row['Configuraciones']);
         console.log('==================================');
 
@@ -80,6 +81,7 @@ async function leerCasosDePrueba(url) {
                 asignMultiple: row['Probar_AsignMultiple'] === 'SI',
                 plantilla: row['Probar_Plantilla'] === 'SI'
             },
+            cuentaDoc: row['CuentaDoc'] || '',
             plantillaNombre: row['Plantilla_Nombre'] || null,
             configuraciones: configuraciones
         });
